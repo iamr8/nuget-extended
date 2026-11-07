@@ -8,8 +8,8 @@ plugins {
     id("org.jetbrains.intellij.platform") version "2.11.0"
 }
 
-// Latest released Rider. Verified on every PR (see `pluginVerification` below).
-val CURRENT_RIDER = "2026.2"
+// Latest released Rider: what a local `verifyPlugin` checks (see `pluginVerification` below).
+val CURRENT_RIDER = "2026.2.4.1"
 
 group = "com.github.iamr8"
 // Single source of truth for the plugin version (also consumed by CI / releases).
@@ -102,24 +102,17 @@ intellijPlatform {
         token = providers.environmentVariable("PUBLISH_TOKEN")
     }
 
-    // `verifyPlugin` (IntelliJ Plugin Verifier). Two scopes, because every extra IDE is a
-    // multi-GB download:
-    //   -PverifierIdes=current -> the current Rider only. Used by the PR check in build.yml, so
-    //                             API breakage surfaces on the PR instead of a weekly run.
-    //   (default)              -> the whole supported range: the floor (2024.3), a mid build and
-    //                             both current releases. This is what keeps since-build 243 honest,
-    //                             and is what compatibility.yml runs.
+    // `verifyPlugin` (IntelliJ Plugin Verifier). -PverifierIdes=<v1,v2,...> picks the Rider
+    // versions; without it, only CURRENT_RIDER (every extra IDE is a multi-GB download). CI runs
+    // one version per job from the matrix in .github/workflows/verify.yml, which holds the full
+    // supported range and keeps since-build 243 honest.
     pluginVerification {
         ides {
+            val versions = providers.gradleProperty("verifierIdes").orNull
+                ?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() && it != "current" }
+                ?.ifEmpty { null } ?: listOf(CURRENT_RIDER)
             // useInstaller = false: Rider is verified from the non-installer distribution.
-            if (providers.gradleProperty("verifierIdes").orNull == "current") {
-                create(IntelliJPlatformType.Rider, CURRENT_RIDER) { useInstaller = false }
-            } else {
-                create(IntelliJPlatformType.Rider, "2024.3.6") { useInstaller = false }
-                create(IntelliJPlatformType.Rider, "2025.2.4") { useInstaller = false }
-                create(IntelliJPlatformType.Rider, "2026.1.4") { useInstaller = false }
-                create(IntelliJPlatformType.Rider, CURRENT_RIDER) { useInstaller = false }
-            }
+            versions.forEach { create(IntelliJPlatformType.Rider, it) { useInstaller = false } }
         }
     }
 }
