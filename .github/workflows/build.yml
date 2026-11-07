@@ -17,6 +17,13 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Plugin Verifier on every supported Rider line; the table goes to the run summary and the PR.
+  verify:
+    uses: ./.github/workflows/verify.yml
+    permissions:
+      contents: read
+      pull-requests: write
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -61,19 +68,6 @@ jobs:
           first=$(echo '{"id":1,"method":"shutdown","params":{}}' | dotnet "$helper" "$RUNNER_TEMP" | head -1)
           echo "$first"
           echo "$first" | grep -q '"event":"hello"'
-
-      # Compatibility check at PR time, against the current Rider only (one IDE download).
-      # The full supported range (2024.3.6 / 2025.2.4 / 2026.1.4 / current) runs in compatibility.yml.
-      - name: Verify plugin compatibility (current Rider)
-        run: ./gradlew verifyPlugin -PverifierIdes=current -Dorg.gradle.java.home="$JAVA_HOME" --stacktrace
-
-      - name: Upload verifier report
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: plugin-verifier-report
-          path: build/reports/pluginVerifier/**
-          if-no-files-found: warn
 
       - name: Publish test report
         uses: dorny/test-reporter@v3
@@ -157,7 +151,7 @@ jobs:
   # so the EAP is higher than the released build and installs over it in Rider. The release notes
   # name the target version and list the PRs since the last stable tag.
   eap:
-    needs: [build, helper-tests]
+    needs: [build, helper-tests, verify] # an EAP ships only when every Rider line verifies
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:

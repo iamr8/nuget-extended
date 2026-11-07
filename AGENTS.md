@@ -110,19 +110,21 @@ SDK 6, 8 and 10. These may run locally with `dotnet test`.
 **Verification happens in CI, not locally.** Don't run Gradle locally to prove a change works —
 open the PR and let its checks do it. `build.yml` runs, on every PR: `test`,
 `verifyPluginProjectConfiguration`, `verifyPluginStructure`, `buildPlugin`, and the **Plugin
-Verifier against the current Rider** (`verifyPlugin -PverifierIdes=current`). A red check is the
-signal to fix; a green one is the evidence. The full IDE range still runs in `compatibility.yml`.
+Verifier on every supported Rider line** (`verify.yml`). A red check is the signal to fix; a green
+one is the evidence.
 UI behavior that no check can cover is confirmed by installing the built zip in real Rider.
 
 ## CI / release
 
-- Workflows: `build.yml` (test + verify + buildPlugin + **Plugin Verifier on the current Rider** +
-  artifact), `codeql.yml` (security; two jobs. java-kotlin needs a real compile:
-  `clean --no-daemon --no-build-cache`. csharp (the helper) uses `build-mode: none`), `compatibility.yml`
-  (weekly plugin verifier, pinned to released Riders across the range — 2024.3.6 / 2025.2.4 /
-  2026.1.4 / 2026.2; `recommended()` can resolve 404 EAPs),
+- Workflows: `build.yml` (test + verify + buildPlugin + artifact, and calls `verify.yml`),
+  `verify.yml` (reusable: the Plugin Verifier, one job per Rider line, newest patch of each, from
+  2024.3 to the current release; the list is its matrix. It writes a Marketplace-style table to the
+  run summary and, on a PR, to one comment that each run updates), `codeql.yml` (security; two jobs.
+  java-kotlin needs a real compile: `clean --no-daemon --no-build-cache`. csharp (the helper) uses
+  `build-mode: none`), `compatibility.yml` (calls `verify.yml` weekly and on demand; pin released
+  Riders, since `recommended()` can resolve 404 EAPs),
   `release.yml`, plus Dependabot. Actions are pinned to latest majors. `build.yml`, `release.yml`
-  and `compatibility.yml` install the .NET SDK (`actions/setup-dotnet@v6`); `codeql.yml` does not
+  and `verify.yml` install the .NET SDK (`actions/setup-dotnet@v6`); `codeql.yml` does not
   (no Gradle task it runs reaches the helper build). `build.yml` and `codeql.yml` cancel a
   superseded run on a PR (`concurrency`); runs on `main`, `release`, schedule and dispatch are never cancelled.
   `build.yml` also runs the helper tests on SDK 6/8/10 and a packaging check that starts the
