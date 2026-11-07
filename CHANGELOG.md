@@ -73,6 +73,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The project search no longer freezes the IDE, and a failure there no longer leaves the toolbar
   disabled. It runs in the background with the scan. A `.cs` file it cannot read is skipped.
   A solution file it cannot read no longer breaks the tool window or the scan. A balloon says so once.
+- A package source that offers only registration types your SDK's NuGet does not know (for example
+  a private feed on an older SDK) is now reported as a failed source. It no longer opens the IDE
+  error dialog.
 
 ## [0.1.4] - 2026-08-29
 

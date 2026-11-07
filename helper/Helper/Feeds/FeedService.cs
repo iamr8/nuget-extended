@@ -149,6 +149,7 @@ public sealed class FeedService : IDisposable
             pending.Add(_candidates.GetOrAdd(key, _ => new Lazy<Task<(IReadOnlyList<Candidate>, SourceFailureInfo?)>>(
                 () => Guarded(source, async cache =>
                 {
+                    await RequireKnownRegistration(source, ct);
                     var res = await source.GetResourceAsync<PackageMetadataResource>(ct);
                     var md = await res.GetMetadataAsync(id, includePrerelease, includeUnlisted: true, cache, Logger, ct);
                     return (IReadOnlyList<Candidate>)md.Select(m => new Candidate(
@@ -165,6 +166,17 @@ public sealed class FeedService : IDisposable
             if (failure != null) failed.Add(failure);
         }
         return new CandidateList(all.GroupBy(c => c.Version).Select(g => g.First()).OrderBy(c => c.Version).ToList(), failed);
+    }
+
+    /// A V3 feed whose service index lists only registration types this NuGet client does not know
+    /// (e.g. only `RegistrationsBaseUrl/3.6.0` for the SDK 6 client) makes NuGet throw an
+    /// ArgumentNullException or NullReferenceException deep inside. Report it as a failure of that
+    /// source instead. Local folders and V2 feeds have no service index and are not affected.
+    private static async Task RequireKnownRegistration(SourceRepository source, CancellationToken ct)
+    {
+        var index = await source.GetResourceAsync<ServiceIndexResourceV3>(ct);
+        if (index != null && index.GetServiceEntryUri(ServiceTypes.RegistrationsBaseUrl) == null)
+            throw new InvalidDataException("the source offers no package registration type that this NuGet version supports");
     }
 
     /// Task.WhenAll reports a fault before a cancel when both happen. A cancelled call must still end as a cancel.

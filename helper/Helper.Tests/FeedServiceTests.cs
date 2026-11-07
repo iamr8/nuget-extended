@@ -205,6 +205,57 @@ public class FeedServiceTests
         Assert.Empty(r2.GetProperty("failures").EnumerateArray());
     }
 
+    // Break: a feed whose service index lists no registration type this NuGet client knows ends the
+    // scan as a "bug" error (the IDE error reporter), not as a failure of that one source.
+    [Fact]
+    public void FeedWithUnknownRegistrationTypeIsASourceFailure()
+    {
+        using var listener = new HttpListener();
+        var port = FreePort();
+        var baseUrl = $"http://127.0.0.1:{port}/";
+        listener.Prefixes.Add(baseUrl);
+        listener.Start();
+        _ = Task.Run(async () =>
+        {
+            while (listener.IsListening)
+            {
+                HttpListenerContext ctx;
+                try { ctx = await listener.GetContextAsync(); } catch { break; }
+                var path = ctx.Request.Url!.AbsolutePath;
+                if (path.EndsWith("/v3/index.json"))
+                    RespondJson(ctx, "{\"version\":\"3.0.0\",\"resources\":[" +
+                                     "{\"@id\":\"" + baseUrl + "flat/\",\"@type\":\"PackageBaseAddress/3.0.0\"}," +
+                                     "{\"@id\":\"" + baseUrl + "reg/\",\"@type\":\"RegistrationsBaseUrl/99.0.0\"}]}");
+                else if (path.EndsWith("/flat/polly/index.json"))
+                    RespondJson(ctx, "{\"versions\":[\"7.0.0\",\"7.2.4\"]}");
+                else
+                {
+                    ctx.Response.StatusCode = 404;
+                    ctx.Response.Close();
+                }
+            }
+        });
+
+        var dir = FixtureSolution.NewDir();
+        var feed = FixtureFeed.Create(dir, ("Polly", new[] { "7.0.0", "7.2.4" }));
+        FixtureSolution.WriteNuGetConfig(dir, ("local", feed));
+        FixtureSolution.Write(dir, "P/P.csproj", $@"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup><TargetFramework>{FixtureSolution.Tfm}</TargetFramework></PropertyGroup>
+  <ItemGroup><PackageReference Include=""Polly"" Version=""7.0.0"" /></ItemGroup>
+</Project>");
+        var project = Path.Combine(dir, "P/P.csproj");
+        FixtureSolution.Restore(project);
+        // Added after the restore, so only the scan reads it.
+        FixtureSolution.WriteNuGetConfig(dir, ("local", feed), ("private", baseUrl + "v3/index.json"));
+        using var h = HelperProcess.Start(dir);
+
+        var r = h.Request("scan", new { solutionDir = dir, projects = new[] { project }, options = new { } });
+
+        Assert.False(r.TryGetProperty("error", out var error) && error.ValueKind != System.Text.Json.JsonValueKind.Null, error.ToString());
+        var failure = r.GetProperty("result").GetProperty("sourceFailures").EnumerateArray().Single();
+        Assert.Equal("private", failure.GetProperty("source").GetString());
+    }
+
     private static void RespondJson(HttpListenerContext ctx, string json)
     {
         var bytes = System.Text.Encoding.UTF8.GetBytes(json);
