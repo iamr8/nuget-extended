@@ -79,6 +79,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Transitive upgrades check the version that ends up in the file against every target framework.
   When two projects add the same new central version, it is the highest version both support.
   A package added next to an existing central version is checked on every framework of the project.
+- The engine starts again on Rider 2024.3 and 2025.1. A plugin lookup used an API those versions
+  do not have, so the tool window could not find its engine there.
 
 ## [0.1.4] - 2026-08-29
 
