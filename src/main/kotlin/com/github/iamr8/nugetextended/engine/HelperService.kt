@@ -9,7 +9,6 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
-import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.progress.ProcessCanceledException
 import com.intellij.openapi.progress.ProgressIndicator
 import com.intellij.openapi.project.Project
@@ -131,8 +130,10 @@ class HelperService(@Suppress("unused") private val project: Project) : Disposab
 
         fun getInstance(project: Project): HelperService = project.service()
 
+        // Not PluginId.getId(...): built against a newer SDK, Kotlin compiles it to PluginId.Companion,
+        // which Rider 2024.3 and 2025.1 do not have (NoSuchFieldError; the Plugin Verifier reports it).
         private fun helperDll(): Path? =
-            PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID))?.pluginPath
+            PluginManagerCore.plugins.firstOrNull { it.pluginId.idString == PLUGIN_ID }?.pluginPath
                 ?.resolve("helper")?.resolve("Helper.dll")
                 ?.takeIf { Files.isRegularFile(it) }
 
