@@ -43,11 +43,25 @@ fun SeverityColor.toJBColor(): Color = when (this) {
 }
 
 internal sealed class ListEntry
+/** A row with a three-state checkbox over its own package rows. */
+internal sealed class GroupEntry(val packages: List<PackageEntry>) : ListEntry()
 /** A `Project · framework` section header carrying its own package rows for the section toggle. */
-internal class HeaderEntry(val title: String, val packages: List<PackageEntry>) : ListEntry()
-internal class PackageEntry(val dep: DepRow, val target: String, val framework: String = "") : ListEntry() {
+internal class HeaderEntry(val title: String, packages: List<PackageEntry>) : GroupEntry(packages)
+/**
+ * By-package view: one package version with a `Project · framework` child row per place that uses it.
+ * When a package has a CPM central row and other rows, [tag] is `central` or `override`.
+ */
+internal class PackageGroupEntry(val id: String, packages: List<PackageEntry>, val tag: String? = null) : GroupEntry(packages)
+/** A package row. With [childLabel] (`Project · framework`) it is a child of a [PackageGroupEntry]. */
+internal class PackageEntry(val dep: DepRow, val target: String, val framework: String = "", val childLabel: String? = null) : ListEntry() {
     var checked: Boolean = false
+
+    /** A CPM central child: its version is shared, so only its package row toggles it. */
+    val followsGroup: Boolean get() = childLabel != null && dep.central
 }
+
+/** What a package row shows: one value when all children agree, else `various`. */
+internal data class GroupSummary(val current: String, val newVersion: String, val color: SeverityColor)
 
 /** One checked row, as the engine's planUpgrade needs it. */
 data class CheckedRow(val project: String, val framework: String, val id: String, val target: String, val restoreOnly: Boolean)
@@ -57,18 +71,61 @@ internal enum class CheckState { NONE, SOME, ALL }
 
 /** Pure list logic (no Swing) — unit-tested; [PackageListView] is the thin Swing wiring. */
 internal object PackageListLogic {
+    const val TAG_CENTRAL = "central"
+    const val TAG_OVERRIDE = "override"
 
     /** Section headers + package rows in display order: sections sorted, deps outdated-first by name. */
     fun buildEntries(sections: List<PackageSection>): List<ListEntry> {
         val entries = ArrayList<ListEntry>()
-        for (section in sections.sortedWith(compareBy({ it.projectName.lowercase() }, { it.framework }))) {
+        for (section in sorted(sections)) {
             val packages = section.deps
                 .sortedWith(compareByDescending<DepRow> { it.outdated }.thenBy { it.name.lowercase() })
                 .map { PackageEntry(it, section.upgradeTarget, section.framework) }
-            entries.add(HeaderEntry("${section.projectName}  ·  ${section.framework}", packages))
+            entries.add(HeaderEntry(title(section), packages))
             entries.addAll(packages)
         }
         return entries
+    }
+
+    /**
+     * Package rows (outdated first, then by name), each followed by its children sorted by project and
+     * framework. One package row holds the CPM central children; the other children get one package
+     * row per current version (VersionOverride, or projects on different versions without CPM). So a
+     * click on a package row never moves a project that holds another version.
+     */
+    fun buildByPackage(sections: List<PackageSection>): List<ListEntry> =
+        sorted(sections)
+            .flatMap { s -> s.deps.map { PackageEntry(it, s.upgradeTarget, s.framework, title(s)) } }
+            .groupBy { it.dep.name.lowercase() }
+            .values
+            .sortedWith(compareByDescending<List<PackageEntry>> { c -> c.any { it.dep.outdated } }.thenBy { it.first().dep.name.lowercase() })
+            .flatMap { children ->
+                val (central, own) = children.partition { it.dep.central }
+                val byVersion = own.groupBy { it.dep.current }.values
+                buildList {
+                    if (central.isNotEmpty()) add(PackageGroupEntry(central.first().dep.name, central, if (own.isEmpty()) null else TAG_CENTRAL))
+                    byVersion.forEach { add(PackageGroupEntry(it.first().dep.name, it, if (central.isEmpty()) null else TAG_OVERRIDE)) }
+                }
+            }
+            .flatMap { listOf(it) + it.packages }
+
+    private fun sorted(sections: List<PackageSection>) = sections.sortedWith(compareBy({ it.projectName.lowercase() }, { it.framework }))
+
+    private fun title(section: PackageSection) = "${section.projectName}  ·  ${section.framework}"
+
+    /** Package rows a click or Space on [entry] toggles: none for a central child. */
+    fun toggleTargets(entry: ListEntry?): List<PackageEntry> = when (entry) {
+        is GroupEntry -> entry.packages.filter { it.dep.outdated }
+        is PackageEntry -> if (entry.dep.outdated && !entry.followsGroup) listOf(entry) else emptyList()
+        null -> emptyList()
+    }
+
+    fun groupSummary(group: PackageGroupEntry): GroupSummary {
+        fun one(values: List<String>) = values.distinct().singleOrNull() ?: "various"
+        val checkable = group.packages.filter { it.dep.outdated }
+        val target = if (checkable.isEmpty()) "" else one(checkable.map { it.dep.newVersion })
+        val color = if (target.isEmpty() || target == "various") SeverityColor.NONE else checkable.first().dep.color
+        return GroupSummary(one(group.packages.map { it.dep.current }), target, color)
     }
 
     fun hasChecked(entries: List<ListEntry>): Boolean =
@@ -99,7 +156,7 @@ internal object PackageListLogic {
         !selectedOutdated.all { it.checked }
 
     /** Aggregate state of a header's outdated rows: NONE, SOME (partial), or ALL. */
-    fun sectionCheckState(header: HeaderEntry): CheckState {
+    fun sectionCheckState(header: GroupEntry): CheckState {
         val outdated = header.packages.filter { it.dep.outdated }
         if (outdated.isEmpty()) return CheckState.NONE
         val checked = outdated.count { it.checked }
@@ -111,7 +168,7 @@ internal object PackageListLogic {
     }
 
     /** True when the header has at least one checkable (outdated) row. */
-    fun sectionHasOutdated(header: HeaderEntry): Boolean = header.packages.any { it.dep.outdated }
+    fun sectionHasOutdated(header: GroupEntry): Boolean = header.packages.any { it.dep.outdated }
 
     /**
      * Text a list entry is matched against by speed search: the package name for a row, the section
@@ -119,9 +176,10 @@ internal object PackageListLogic {
      * renderer highlights.
      */
     fun searchText(entry: ListEntry?): String = when (entry) {
-        is PackageEntry -> entry.dep.name
+        is PackageEntry -> entry.childLabel ?: entry.dep.name
         is HeaderEntry -> entry.title
-        else -> ""
+        is PackageGroupEntry -> entry.id
+        null -> ""
     }
 }
 
@@ -150,13 +208,11 @@ class PackageListView(private val onSelectionChanged: () -> Unit) {
                 when (val entry = model.getElementAt(index)) {
                     is PackageEntry -> if (entry.dep.blocked != null && renderer.hitsInfo(list, index, e.point)) {
                         showBlocked(entry.dep.blocked, e)
-                    } else if (entry.dep.outdated && e.x <= CHECKBOX_HIT_WIDTH) {
-                        entry.checked = !entry.checked
-                        list.repaint()
-                        onSelectionChanged()
+                    } else if (e.x <= checkboxEnd(entry)) {
+                        toggle(PackageListLogic.toggleTargets(entry))
                     }
-                    // The section checkbox toggles every outdated package under the header.
-                    is HeaderEntry -> if (e.x <= CHECKBOX_HIT_WIDTH) toggleSection(entry)
+                    // The section or package checkbox toggles every outdated package under it.
+                    is GroupEntry -> if (e.x <= CHECKBOX_HIT_WIDTH) toggle(PackageListLogic.toggleTargets(entry))
                 }
             }
         })
@@ -172,9 +228,10 @@ class PackageListView(private val onSelectionChanged: () -> Unit) {
 
     val component: JComponent get() = list
 
-    fun setData(sections: List<PackageSection>) {
+    /** Rebuilds the list (checks are cleared): grouped by package when [byPackage], else by project. */
+    fun setData(sections: List<PackageSection>, byPackage: Boolean = false) {
         model.clear()
-        PackageListLogic.buildEntries(sections).forEach { model.addElement(it) }
+        model.addAll(if (byPackage) PackageListLogic.buildByPackage(sections) else PackageListLogic.buildEntries(sections))
     }
 
     fun hasChecked(): Boolean = PackageListLogic.hasChecked(entries())
@@ -195,31 +252,24 @@ class PackageListView(private val onSelectionChanged: () -> Unit) {
         onSelectionChanged()
     }
 
-    /** Check/uncheck every outdated row under one section header. */
-    private fun toggleSection(header: HeaderEntry) {
-        val outdated = header.packages.filter { it.dep.outdated }
-        if (outdated.isEmpty()) return
-        val newState = PackageListLogic.nextToggleState(outdated)
-        outdated.forEach { it.checked = newState }
-        list.repaint()
-        onSelectionChanged()
-    }
-
-    /** Checked outdated rows for the upgrade. */
-    fun checkedRows(): List<CheckedRow> = PackageListLogic.checkedRows(entries())
-
-    private fun toggleCheckedForSelection() {
-        val targets = ArrayList<PackageEntry>()
-        for (idx in list.selectedIndices) {
-            val entry = model.getElementAt(idx) as? PackageEntry ?: continue
-            if (entry.dep.outdated) targets.add(entry)
-        }
+    /** Check all [targets] if any is unchecked, else uncheck them all. */
+    private fun toggle(targets: List<PackageEntry>) {
         if (targets.isEmpty()) return
         val newState = PackageListLogic.nextToggleState(targets)
         targets.forEach { it.checked = newState }
         list.repaint()
         onSelectionChanged()
     }
+
+    /** Right edge of the checkbox click area: a child row's checkbox is indented. */
+    private fun checkboxEnd(entry: PackageEntry): Int =
+        CHECKBOX_HIT_WIDTH + if (entry.childLabel != null) JBUI.scale(CHILD_INDENT) else 0
+
+    /** Checked outdated rows for the upgrade. */
+    fun checkedRows(): List<CheckedRow> = PackageListLogic.checkedRows(entries())
+
+    private fun toggleCheckedForSelection() =
+        toggle(list.selectedIndices.flatMap { PackageListLogic.toggleTargets(model.getElementAt(it)) }.distinct())
 
     /** The shared-version message in a balloon under the click. */
     private fun showBlocked(message: String, e: MouseEvent) {
@@ -252,7 +302,21 @@ class PackageListView(private val onSelectionChanged: () -> Unit) {
             layout = BoxLayout(this, BoxLayout.X_AXIS)
         }
 
-        private val rowPanel = JPanel(BorderLayout()).apply { border = JBUI.Borders.empty(3, 8, 3, 10) }
+        private val rowBorder = JBUI.Borders.empty(3, 8, 3, 10)
+        private val childBorder = JBUI.Borders.empty(3, 8 + CHILD_INDENT, 3, 10)
+        private val groupPanel = JPanel(BorderLayout()).apply { border = rowBorder }
+        private val groupCheck = ThreeStateCheckBox().apply {
+            isOpaque = false // display-only, like the header checkbox
+            border = JBUI.Borders.emptyRight(6)
+        }
+        private val groupLeft = SimpleColoredComponent().apply { isOpaque = false }
+        private val groupRight = SimpleColoredComponent().apply { isOpaque = false }
+        private val groupWest = JPanel().apply {
+            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+        }
+
+        private val rowPanel = JPanel(BorderLayout()).apply { border = rowBorder }
         private val checkBox = JCheckBox().apply { isOpaque = false; border = JBUI.Borders.emptyRight(6) }
         private val westPanel = JPanel().apply {
             isOpaque = false
@@ -270,6 +334,10 @@ class PackageListView(private val onSelectionChanged: () -> Unit) {
             headerWest.add(headerCheck)
             headerWest.add(header)
             headerPanel.add(headerWest, BorderLayout.WEST)
+            groupWest.add(groupCheck)
+            groupWest.add(groupLeft)
+            groupPanel.add(groupWest, BorderLayout.WEST)
+            groupPanel.add(groupRight, BorderLayout.EAST)
             rowPanel.add(westPanel, BorderLayout.WEST)
             rowPanel.add(right, BorderLayout.EAST)
         }
@@ -288,11 +356,7 @@ class PackageListView(private val onSelectionChanged: () -> Unit) {
                 // The section checkbox mirrors its packages: all / partial / none. Kept visible but
                 // greyed when nothing is checkable, so headers stay aligned (matches the row checkboxes).
                 headerCheck.isEnabled = PackageListLogic.sectionHasOutdated(entry)
-                headerCheck.state = when (PackageListLogic.sectionCheckState(entry)) {
-                    CheckState.ALL -> ThreeStateCheckBox.State.SELECTED
-                    CheckState.SOME -> ThreeStateCheckBox.State.DONT_CARE
-                    CheckState.NONE -> ThreeStateCheckBox.State.NOT_SELECTED
-                }
+                headerCheck.state = checkState(entry)
                 header.clear()
                 header.append(entry.title, SimpleTextAttributes.GRAYED_BOLD_ATTRIBUTES)
                 // Highlight the speed-search match inside the header title, like Rider's own lists.
@@ -300,13 +364,42 @@ class PackageListView(private val onSelectionChanged: () -> Unit) {
                 headerPanel
             }
 
+            is PackageGroupEntry -> {
+                val bg = if (selected) list.selectionBackground else list.background
+                groupPanel.isOpaque = true
+                groupPanel.background = bg
+                groupCheck.background = bg
+                groupCheck.isEnabled = PackageListLogic.sectionHasOutdated(entry)
+                groupCheck.state = checkState(entry)
+                val summary = PackageListLogic.groupSummary(entry)
+                groupLeft.clear()
+                groupRight.clear()
+                val nameAttr = if (selected) SimpleTextAttributes(SimpleTextAttributes.STYLE_BOLD, list.selectionForeground)
+                else SimpleTextAttributes.REGULAR_BOLD_ATTRIBUTES
+                groupLeft.append(entry.id, nameAttr)
+                entry.tag?.let { groupLeft.append(" ($it)", SimpleTextAttributes.GRAYED_ATTRIBUTES) }
+                groupLeft.append("  ·  ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                groupLeft.append(summary.current, SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                SpeedSearchUtil.applySpeedSearchHighlighting(list, groupLeft, false, selected)
+                if (summary.newVersion.isNotEmpty()) {
+                    val attr = when {
+                        summary.color != SeverityColor.NONE -> SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, summary.color.toJBColor())
+                        else -> SimpleTextAttributes.GRAYED_ATTRIBUTES // "various"
+                    }
+                    groupRight.append(summary.newVersion, attr)
+                }
+                groupPanel
+            }
+
             is PackageEntry -> {
                 val bg = if (selected) list.selectionBackground else list.background
                 rowPanel.isOpaque = true
                 rowPanel.background = bg
-                rowPanel.toolTipText = entry.dep.note
+                rowPanel.border = if (entry.childLabel != null) childBorder else rowBorder
+                rowPanel.toolTipText = if (entry.followsGroup && entry.dep.outdated) CENTRAL_NOTE else entry.dep.note
                 checkBox.background = bg
-                checkBox.isEnabled = entry.dep.outdated // only outdated packages are checkable
+                // Only outdated packages are checkable; a central child follows its package row.
+                checkBox.isEnabled = entry.dep.outdated && !entry.followsGroup
                 checkBox.isSelected = entry.checked && entry.dep.outdated
 
                 left.clear()
@@ -319,7 +412,7 @@ class PackageListView(private val onSelectionChanged: () -> Unit) {
                 } else {
                     SimpleTextAttributes.REGULAR_ATTRIBUTES
                 }
-                left.append(entry.dep.name, nameAttr)
+                left.append(entry.childLabel ?: entry.dep.name, nameAttr)
                 left.append("  ·  ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 left.append(entry.dep.current, SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 // Highlight the speed-search match inside the row text, so the matched characters
@@ -339,6 +432,12 @@ class PackageListView(private val onSelectionChanged: () -> Unit) {
                 }
                 rowPanel
             }
+        }
+
+        private fun checkState(group: GroupEntry): ThreeStateCheckBox.State = when (PackageListLogic.sectionCheckState(group)) {
+            CheckState.ALL -> ThreeStateCheckBox.State.SELECTED
+            CheckState.SOME -> ThreeStateCheckBox.State.DONT_CARE
+            CheckState.NONE -> ThreeStateCheckBox.State.NOT_SELECTED
         }
 
         /**
@@ -377,5 +476,7 @@ class PackageListView(private val onSelectionChanged: () -> Unit) {
 
     private companion object {
         const val CHECKBOX_HIT_WIDTH = 32 // left px region that toggles the checkbox
+        const val CHILD_INDENT = 22 // extra left inset of a child row in the by-package view
+        const val CENTRAL_NOTE = "Set in the central package file, so it changes for every project. Use the package row."
     }
 }

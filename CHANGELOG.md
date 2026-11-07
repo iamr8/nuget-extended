@@ -34,6 +34,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Out-of-date projects are restored before the scan. Turn it off with **Never run dotnet restore**.
 - A project opened in safe mode (not trusted) is never restored and its file-based apps are not
   read. Out-of-date projects in it are listed as skipped.
+- **Group by Package** view (eye icon in the toolbar). Each package shows once, with one row per
+  project and target framework under it. Under Central Package Management, the project rows follow
+  the package row, because the central version changes for every project. Projects on another
+  version (a `VersionOverride`, or a different version without CPM) get a package row per version,
+  and each one can be checked alone.
 
 ### Fixed
 - Upper-only ranges like `(,3.0.0]` no longer fail the scan.

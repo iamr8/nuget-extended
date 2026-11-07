@@ -135,6 +135,13 @@ class OutdatedRowsTest {
         assertEquals(why, dep.note)
     }
 
+    // Break: toDep drops the engine's `central` flag, so the by-package view enables a CPM child.
+    @Test
+    fun centralFlagReachesTheRow() {
+        assertTrue(OutdatedRows.toDep(PackageRow("Serilog", "3.0.0", "3.0.0", "4.4.0", "Major", central = true)).central)
+        assertFalse(OutdatedRows.toDep(PackageRow("Serilog", "3.0.0", "3.0.0", "4.4.0", "Major")).central)
+    }
+
     // Break: fromScan drops a blocked row as if it had no target.
     @Test
     fun blockedRowStaysInTheList() {

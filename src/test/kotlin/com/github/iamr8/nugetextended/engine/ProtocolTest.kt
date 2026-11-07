@@ -27,9 +27,17 @@ class ProtocolTest {
         assertEquals("8.8.0", row.capped)
         assertEquals(false, row.restoreOnly)
         assertNull(row.reason)
+        assertEquals(false, row.central)
         assertEquals(listOf("/r/B/B.csproj"), r.stale)
         assertTrue(r.failures.isEmpty())
         assertTrue(r.sourceFailures.isEmpty())
+    }
+
+    // Break: PackageRow has no `central` field, or Gson maps it to another name.
+    @Test
+    fun parsesCentralFlag() {
+        val row = gson.fromJson("""{"id":"Serilog","central":true}""", PackageRow::class.java)
+        assertEquals(true, row.central)
     }
 
     @Test

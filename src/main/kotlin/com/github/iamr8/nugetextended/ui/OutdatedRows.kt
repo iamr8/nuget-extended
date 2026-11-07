@@ -22,6 +22,8 @@ class DepRow(
     val note: String? = null,
     /** Set when a newer version exists but a package sharing this version lacks it: not checkable. */
     val blocked: String? = null,
+    /** The version is the CPM central item: in the by-package view the row follows its package row. */
+    val central: Boolean = false,
 )
 
 /** A project + target framework group of packages, e.g. "Sahelanthropus.Data · net10.0". */
@@ -69,12 +71,13 @@ object OutdatedRows {
         return when {
             target != null && row.blocked != null -> DepRow(
                 row.id, current, target, SeverityColor.NONE, outdated = false,
-                requested = row.requested, note = row.blocked, blocked = row.blocked,
+                requested = row.requested, note = row.blocked, blocked = row.blocked, central = row.central,
             )
             target != null -> DepRow(
                 row.id, current, target, severityColor(UpgradeSeverity.from(row.severity), target), outdated = true,
                 requested = row.requested,
                 restoreOnly = row.restoreOnly,
+                central = row.central,
                 note = when {
                     row.restoreOnly -> "Floating version ${row.requested}: restore picks $target."
                     capped != null -> "$capped is newer but outside ${row.requested}."
@@ -85,10 +88,11 @@ object OutdatedRows {
                 row.id, current, if (showCapped) capped else "", SeverityColor.NONE, outdated = false,
                 requested = row.requested,
                 note = "${row.reason ?: "capped by range"}: ${row.requested}",
+                central = row.central,
             )
             else -> DepRow(
                 row.id, current, sourceFailureMarker(row.reason), SeverityColor.NONE, outdated = false,
-                requested = row.requested, note = row.reason,
+                requested = row.requested, note = row.reason, central = row.central,
             )
         }
     }
