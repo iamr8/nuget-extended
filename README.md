@@ -37,6 +37,9 @@ It was called *dotnet outdated GUI* before.
 - **Floating versions** (`3.*`) update by a restore, with no file edit.
 - **A clear list.** Packages are grouped by project and target framework. The new version has a
   color by SemVer change: green = patch, yellow = minor, red = major or pre-release.
+- **Group by Package.** The eye icon switches the list to one row per package, with its projects
+  under it. A package from `Directory.Packages.props` is checked once for all projects. Projects on
+  another version (a `VersionOverride`, or a different version without CPM) get their own row.
 - **A plan before each change.** A dialog shows the files, the packages that share a version, and
   what it skips (and why). One **Undo** reverts every file.
 - **Your NuGet setup.** It uses your `NuGet.config`, package source mapping and credential

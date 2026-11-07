@@ -51,6 +51,10 @@ data class OutdatedOptions(
     var idleTimeoutSeconds: Int = 300,
     var runtime: String = "",
     var credLogLevel: CredLogLevel = CredLogLevel.Warning,
+
+    // View
+    /** Group the list by package (children per project) instead of by project. */
+    var groupByPackage: Boolean = false,
 ) {
     /** Copies every field from [other] in place (keeps this instance's identity for UI bindings). */
     fun assignFrom(other: OutdatedOptions) {
@@ -73,6 +77,7 @@ data class OutdatedOptions(
         idleTimeoutSeconds = other.idleTimeoutSeconds
         runtime = other.runtime
         credLogLevel = other.credLogLevel
+        groupByPackage = other.groupByPackage
     }
 
     /** Independent deep copy (lists not shared). */

@@ -28,6 +28,8 @@ data class PackageRow(
     val reason: String? = null,
     /** Why [target] cannot be applied: another package on the same version site lacks it. */
     val blocked: String? = null,
+    /** The version is the CPM central item: an upgrade moves every project that uses it. */
+    val central: Boolean = false,
 )
 
 data class FrameworkRows(val framework: String = "", val packages: List<PackageRow> = emptyList())

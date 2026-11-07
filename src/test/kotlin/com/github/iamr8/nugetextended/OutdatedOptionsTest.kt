@@ -33,6 +33,7 @@ class OutdatedOptionsTest {
         idleTimeoutSeconds = 200,
         runtime = "linux-x64",
         credLogLevel = CredLogLevel.Error,
+        groupByPackage = true,
     )
 
     @Test

@@ -35,6 +35,7 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.DefaultActionGroup
+import com.intellij.openapi.actionSystem.ToggleAction
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.fileEditor.FileDocumentManager
@@ -110,6 +111,7 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
             add(SelectAllAction())
             add(UpdateAction())
             addSeparator()
+            add(ViewGroup())
             add(OptionsAction())
         }
         return ActionManager.getInstance()
@@ -246,7 +248,7 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     /** Render the list from [allRows] and update the status line. EDT only. */
     private fun render() {
-        listView.setData(allRows)
+        listView.setData(allRows, optionsService.options.groupByPackage)
         val total = allRows.sumOf { it.deps.size }
         val projects = allRows.map { it.projectName }.distinct().size
         val outdated = allRows.sumOf { s -> s.deps.count { it.outdated } }
@@ -647,6 +649,26 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
             e.presentation.isEnabled = !busy && listView.hasChecked()
         }
         override fun actionPerformed(e: AnActionEvent) = runUpgrade()
+    }
+
+    /** The eye menu: how the list is grouped. */
+    private inner class ViewGroup : DefaultActionGroup("View", true) {
+        init {
+            templatePresentation.icon = AllIcons.Actions.Show
+            add(ViewModeAction(byPackage = false, "Group by Project"))
+            add(ViewModeAction(byPackage = true, "Group by Package"))
+        }
+    }
+
+    private inner class ViewModeAction(private val byPackage: Boolean, text: String) : ToggleAction(text) {
+        override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        override fun isSelected(e: AnActionEvent) = optionsService.options.groupByPackage == byPackage
+        override fun setSelected(e: AnActionEvent, state: Boolean) {
+            if (!state) return // a click on the selected mode
+            optionsService.options.groupByPackage = byPackage
+            render() // rebuilds the list, so checks are cleared
+            toolbar.updateActionsAsync()
+        }
     }
 
     private inner class OptionsAction : AnAction("Settings", "Open ${PluginText.NAME} settings", AllIcons.General.Settings) {

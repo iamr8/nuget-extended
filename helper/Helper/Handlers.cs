@@ -154,7 +154,8 @@ public sealed class Handlers
                 {
                     var key = GroupKey(w.P.Path, w.T, w.A.Id);
                     candidates.TryGetValue(key, out var c);
-                    var row = RowBuilder.Row(w.A, w.Requested, o.CheckUpdates ? c : null, NuGetFramework.Parse(w.T.Framework), o, now);
+                    var row = RowBuilder.Row(w.A, w.Requested, o.CheckUpdates ? c : null, NuGetFramework.Parse(w.T.Framework), o, now)
+                        with { Central = SiteResolver.IsCentral(w.T, w.A.Id) };
                     // Don't overwrite an existing Reason (bad range text, not resolved): only a row
                     // that would otherwise vanish (no Target, no Reason) gets the source failure.
                     if (row.Target == null && row.Reason == null && groupFailed.TryGetValue(key, out var gf) && gf.Count > 0)

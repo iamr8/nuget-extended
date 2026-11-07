@@ -510,6 +510,40 @@ public class ScanTests
         Assert.True(mem2 < mem1 * 1.2, $"memory grew from {mem1} to {mem2}");
     }
 
+    // Break: Scan does not set "central", or sets it for a VersionOverride row too.
+    [Fact]
+    public void CentralFlagFollowsTheVersionSource()
+    {
+        var dir = FixtureSolution.NewDir();
+        var feed = FixtureFeed.Create(dir, ("Serilog", new[] { "3.0.0", "4.4.0" }));
+        FixtureSolution.WriteNuGetConfig(dir, ("local", feed));
+        FixtureSolution.Write(dir, "Directory.Packages.props", @"<Project>
+  <PropertyGroup><ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally></PropertyGroup>
+  <ItemGroup><PackageVersion Include=""Serilog"" Version=""3.0.0"" /></ItemGroup>
+</Project>");
+        FixtureSolution.Write(dir, "A/A.csproj", $@"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup><TargetFramework>{FixtureSolution.Tfm}</TargetFramework></PropertyGroup>
+  <ItemGroup><PackageReference Include=""Serilog"" /></ItemGroup>
+</Project>");
+        FixtureSolution.Write(dir, "B/B.csproj", $@"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup><TargetFramework>{FixtureSolution.Tfm}</TargetFramework></PropertyGroup>
+  <ItemGroup><PackageReference Include=""Serilog"" VersionOverride=""3.0.0"" /></ItemGroup>
+</Project>");
+        var a = Path.Combine(dir, "A/A.csproj");
+        var b = Path.Combine(dir, "B/B.csproj");
+        FixtureSolution.Restore(a);
+        FixtureSolution.Restore(b);
+        using var h = HelperProcess.Start(dir);
+
+        var r = Scan(h, dir, new[] { a, b });
+
+        bool Central(string name) => r.GetProperty("projects").EnumerateArray()
+            .Single(p => p.GetProperty("name").GetString() == name)
+            .GetProperty("frameworks")[0].GetProperty("packages")[0].GetProperty("central").GetBoolean();
+        Assert.True(Central("A"));
+        Assert.False(Central("B"));
+    }
+
     private static void RunExpectSuccess(string exe, string args, string? workingDirectory = null)
     {
         var psi = new ProcessStartInfo(exe, args) { RedirectStandardOutput = true, RedirectStandardError = true };

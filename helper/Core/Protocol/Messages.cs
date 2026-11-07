@@ -24,7 +24,8 @@ public sealed record ScanParams(string SolutionDir, IReadOnlyList<string> Projec
 
 public sealed record PackageRow(string Id, string Requested, string? Resolved, string? Target, string Severity,
     string? Capped, bool RestoreOnly, bool Transitive, bool AutoReferenced, string? Reason,
-    string? Blocked = null); // Target exists but another id on the same version site lacks it (SharedVersions)
+    string? Blocked = null, // Target exists but another id on the same version site lacks it (SharedVersions)
+    bool Central = false); // The version is the CPM central item: an upgrade moves every project that uses it
 
 public sealed record FrameworkRows(string Framework, IReadOnlyList<PackageRow> Packages);
 

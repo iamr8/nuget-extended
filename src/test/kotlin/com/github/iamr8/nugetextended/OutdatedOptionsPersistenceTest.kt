@@ -45,6 +45,7 @@ class OutdatedOptionsPersistenceTest {
             idleTimeoutSeconds = 250,
             runtime = "linux-x64",
             credLogLevel = CredLogLevel.Error,
+            groupByPackage = true,
         )
         assertEquals(o, roundTrip(o))
     }
