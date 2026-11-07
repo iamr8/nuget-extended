@@ -160,4 +160,13 @@ class OutdatedRowsTest {
         val deps = OutdatedRows.fromScan(result(row), emptyList(), emptyList()).single().deps
         assertEquals(listOf("Lib.X"), deps.map { it.name })
     }
+
+    // Break: toDep sets `major` for a minor, pre-release or blocked upgrade, or misses a stable major one.
+    @Test
+    fun majorIsOnlyAStableCheckableMajorUpgrade() {
+        assertTrue(OutdatedRows.toDep(PackageRow("A", "8.0.0", "8.0.0", "9.0.0", "Major")).major)
+        assertFalse(OutdatedRows.toDep(PackageRow("B", "8.0.0", "8.0.0", "9.0.0-rc.1", "Major")).major)
+        assertFalse(OutdatedRows.toDep(PackageRow("C", "8.0.0", "8.0.0", "8.1.0", "Minor")).major)
+        assertFalse(OutdatedRows.toDep(PackageRow("D", "8.0.0", "8.0.0", "9.0.0", "Major", blocked = "shared with E")).major)
+    }
 }

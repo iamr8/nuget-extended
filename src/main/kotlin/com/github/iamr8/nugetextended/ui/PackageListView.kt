@@ -73,6 +73,8 @@ internal data class GroupSummary(val current: String, val newVersion: String, va
 data class CheckedRow(val project: String, val framework: String, val id: String, val target: String, val restoreOnly: Boolean)
 
 internal fun PackageEntry.toCheckedRow() = CheckedRow(target, framework, dep.name, dep.newVersion, dep.restoreOnly)
+/** The rows a recommendation click checks, and the list index it scrolls to (-1 when gone). */
+internal class Recommendation(val index: Int, val rows: List<PackageEntry>)
 
 /** Aggregate checkbox state of a section's outdated rows. */
 internal enum class CheckState { NONE, SOME, ALL }
@@ -142,6 +144,24 @@ internal object PackageListLogic {
     /** Checkable (outdated) package rows. */
     fun outdatedEntries(entries: List<ListEntry>): List<PackageEntry> =
         entries.filterIsInstance<PackageEntry>().filter { it.dep.outdated }
+
+    /** Ids of packages with a checkable major upgrade, once each, in list order. */
+    fun majorIds(entries: List<ListEntry>): List<String> =
+        entries.filterIsInstance<PackageEntry>().filter { it.dep.major }.map { it.dep.name }.distinctBy { it.lowercase() }
+
+    /** Banner text for [count] packages with a new major version, of which the first [shown] are links. */
+    fun recommendationText(count: Int, shown: Int): String {
+        val head = if (count == 1) "1 package has" else "$count packages have"
+        val more = count - shown
+        return "$head a new major version. Click one to check it." + if (more > 0) " +$more more in the list." else ""
+    }
+
+    /** A click on recommended package [id]: check its major rows and scroll to its first package row. */
+    fun recommend(entries: List<ListEntry>, id: String): Recommendation {
+        fun hit(e: PackageEntry) = e.dep.major && e.dep.name.equals(id, ignoreCase = true)
+        val index = entries.indexOfFirst { it is PackageEntry && hit(it) || it is PackageGroupEntry && it.packages.any(::hit) }
+        return Recommendation(index, entries.filterIsInstance<PackageEntry>().filter(::hit))
+    }
 
     /** True when at least one row is checkable. */
     fun hasOutdated(entries: List<ListEntry>): Boolean = outdatedEntries(entries).isNotEmpty()
@@ -272,21 +292,33 @@ internal class PackageListView(
     /** True when every outdated row is checked (drives the Select/Deselect All label). */
     fun allOutdatedChecked(): Boolean = PackageListLogic.allOutdatedChecked(entries())
 
+    /** Package ids with a stable major upgrade, for the recommendations banner. */
+    fun majorIds(): List<String> = PackageListLogic.majorIds(entries())
+
+    /** Checks the major rows of [id] and scrolls to its package row. */
+    fun recommend(id: String) {
+        val r = PackageListLogic.recommend(entries(), id)
+        if (r.index < 0) return
+        list.selectedIndex = r.index
+        list.ensureIndexIsVisible(r.index)
+        setChecked(r.rows, true)
+    }
+
     /** Check all outdated rows if any is unchecked, else uncheck them all. */
     fun toggleSelectAll() {
         val outdated = PackageListLogic.outdatedEntries(entries())
         if (outdated.isEmpty()) return
-        val newState = PackageListLogic.nextToggleState(outdated)
-        outdated.forEach { it.checked = newState }
-        list.repaint()
-        onSelectionChanged()
+        setChecked(outdated, PackageListLogic.nextToggleState(outdated))
     }
 
     /** Check all [targets] if any is unchecked, else uncheck them all. */
     private fun toggle(targets: List<PackageEntry>) {
         if (targets.isEmpty()) return
-        val newState = PackageListLogic.nextToggleState(targets)
-        targets.forEach { it.checked = newState }
+        setChecked(targets, PackageListLogic.nextToggleState(targets))
+    }
+
+    private fun setChecked(targets: List<PackageEntry>, state: Boolean) {
+        targets.forEach { it.checked = state }
         list.repaint()
         onSelectionChanged()
     }

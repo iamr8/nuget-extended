@@ -34,6 +34,7 @@ class OutdatedOptionsTest {
         runtime = "linux-x64",
         credLogLevel = CredLogLevel.Error,
         groupByPackage = true,
+        showRecommendations = false,
     )
 
     @Test

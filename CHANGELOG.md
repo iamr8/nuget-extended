@@ -43,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Definition* (the line in `Directory.Packages.props` or the project file), *Open on nuget.org*,
   *Open Project Page* (when the feed gives one), *Show in NuGet Window* and *Copy Package Id*.
   A project row: *Open {Project}.csproj* and *Upgrade All in This Project*.
+- **Recommendations.** After an update check, a blue banner lists the packages with a new major
+  version (not a pre-release). Click a name to scroll to it and check it. Turn it off in the eye
+  menu with **Show Recommendations**. A closed banner comes back with the next scan.
 
 ### Fixed
 - Upper-only ranges like `(,3.0.0]` no longer fail the scan.

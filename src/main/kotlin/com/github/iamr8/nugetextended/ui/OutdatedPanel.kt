@@ -51,6 +51,8 @@ import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.util.text.StringUtil
 import com.intellij.openapi.wm.ToolWindowManager
+import com.intellij.ui.EditorNotificationPanel
+import com.intellij.ui.InlineBanner
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
@@ -86,11 +88,18 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
     /** EDT only: the scope changed while a scan ran, so the list loads again when it ends. */
     private var relistAfterScan = false
     private var listedOnce = false
+    /** Holds the recommendations banner, under the toolbar. */
+    private val recommendations = JPanel(BorderLayout()).apply { border = JBUI.Borders.empty(0, 8, 6, 8) }
+    /** The user closed the banner: it stays hidden until the next scan. */
+    private var recommendationsClosed = false
     /** True while the solution file is unreadable, so its balloon shows once per failure streak. Declared before `init`. */
     @Volatile private var solutionUnreadable = false
 
     init {
-        add(toolbar.component, BorderLayout.NORTH)
+        add(JPanel(BorderLayout()).apply {
+            add(toolbar.component, BorderLayout.NORTH)
+            add(recommendations, BorderLayout.CENTER)
+        }, BorderLayout.NORTH)
         add(JBScrollPane(listView.component), BorderLayout.CENTER)
         add(status.apply { border = JBUI.Borders.empty(4, 8) }, BorderLayout.SOUTH)
 
@@ -248,6 +257,21 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
                 notifyFailure(context, listOf(ScanFailure("Engine", error.message ?: context, (error as HelperException).details.orEmpty())))
             else -> reportInternalError(context, error)
         }
+    }
+
+    /** After an update check (only then do rows carry `major`), a banner lists the packages with a new major version. A click checks one. EDT only. */
+    private fun updateRecommendations() {
+        recommendations.removeAll()
+        val ids = if (!recommendationsClosed && optionsService.options.showRecommendations) listView.majorIds() else emptyList()
+        if (ids.isNotEmpty()) {
+            val shown = ids.take(MAX_RECOMMENDATIONS)
+            val text = PackageListLogic.recommendationText(ids.size, shown.size)
+            val banner = InlineBanner(text, EditorNotificationPanel.Status.Info).setCloseAction { recommendationsClosed = true }
+            shown.forEach { id -> banner.addAction(id) { listView.recommend(id) } }
+            recommendations.add(banner)
+        }
+        recommendations.revalidate()
+        recommendations.repaint()
     }
 
     private fun notificationGroup() =
@@ -443,7 +467,9 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
         allRows = rows // PackageListView sorts sections/rows for a stable order
         skippedProjects = failures.size
         updatesChecked = checked
+        recommendationsClosed = false
         render()
+        updateRecommendations()
         // Nothing came back at all -> tell the user why. Partial results already say "(n skipped)"
         // in the status line, so that case gets a quiet, non-status-hijacking balloon.
         if (rows.isEmpty() && failures.isNotEmpty()) notifyFailure(hardFailContext, failures)
@@ -697,6 +723,18 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
             templatePresentation.icon = AllIcons.Actions.Show
             add(ViewModeAction(byPackage = false, "Group by Project"))
             add(ViewModeAction(byPackage = true, "Group by Package"))
+            addSeparator()
+            add(ShowRecommendationsAction())
+        }
+    }
+
+    private inner class ShowRecommendationsAction : ToggleAction("Show Recommendations") {
+        override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        override fun isSelected(e: AnActionEvent) = optionsService.options.showRecommendations
+        override fun setSelected(e: AnActionEvent, state: Boolean) {
+            optionsService.options.showRecommendations = state
+            if (state) recommendationsClosed = false
+            updateRecommendations()
         }
     }
 
@@ -721,6 +759,8 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
     companion object {
         /** Id of Rider's own NuGet tool window. */
         private const val RIDER_NUGET_TOOL_WINDOW = "NuGet"
+        /** The banner links at most this many packages. */
+        private const val MAX_RECOMMENDATIONS = 10
         private val LOG = logger<OutdatedPanel>()
         private const val MIN_TIMEOUT_SECONDS = 30
         /** Must match the <notificationGroup id="…"> in plugin.xml. */
