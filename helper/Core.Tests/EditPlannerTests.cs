@@ -428,6 +428,82 @@ public class EditPlannerTests
         }
     }
 
+    private static EvaluatedProject CpmProj(string name, string[] frameworks, params PackageItem[] items) =>
+        new($"{Root}/{name}/{name}.csproj", name,
+            frameworks.Select(f => new EvaluatedTfm(f, "", true, false, $"{Root}/Directory.Packages.props", items, Array.Empty<string>())).ToArray(),
+            new[] { $"{Root}/{name}/{name}.csproj" }, null);
+
+    // Break (#61 gap 1): two projects insert the same new central PackageVersion, and the higher
+    // version wins without a check against the other project's framework.
+    [Fact]
+    public void SharedCentralInsertPicksAVersionEveryInsertingProjectSupports()
+    {
+        var a = CpmProj("A", new[] { "net8.0" });
+        var b = CpmProj("B", new[] { "net6.0" });
+        Func<string, EvaluatedTfm, string, IReadOnlyList<Candidate>> candidates =
+            (_, _, _) => new[] { Cand("8.0.0", "net6.0", "net8.0"), Cand("9.0.0", "net8.0") };
+
+        var plan = EditPlanner.Plan(
+            new[] { new UpgradeRow(a.Path, "net8.0", "Leaf", "9.0.0"), new UpgradeRow(b.Path, "net6.0", "Leaf", "8.0.0") },
+            new[] { a, b }, candidates, new ScanOptions(Transitive: true), Root);
+
+        Assert.Equal("8.0.0", Assert.Single(plan.Edits, e => e.ItemType == "PackageVersion").Value);
+        Assert.Equal(2, plan.Edits.Count(e => e.ItemType == "PackageReference"));
+        Assert.Empty(plan.Skipped);
+    }
+
+    // Break (#61 gap 1): no shared version fits, yet the inserts still happen.
+    [Fact]
+    public void SharedCentralInsertIsSkippedWhenNoVersionFitsEveryProject()
+    {
+        var a = CpmProj("A", new[] { "net8.0" });
+        var b = CpmProj("B", new[] { "net6.0" });
+        Func<string, EvaluatedTfm, string, IReadOnlyList<Candidate>> candidates =
+            (_, _, _) => new[] { Cand("8.0.0", "net8.0"), Cand("9.0.0", "net8.0") };
+
+        var plan = EditPlanner.Plan(
+            new[] { new UpgradeRow(a.Path, "net8.0", "Leaf", "9.0.0"), new UpgradeRow(b.Path, "net6.0", "Leaf", "8.0.0") },
+            new[] { a, b }, candidates, new ScanOptions(Transitive: true), Root);
+
+        Assert.Empty(plan.Edits);
+        Assert.Equal(2, plan.Skipped.Count);
+    }
+
+    // Break (#61 gap 2): the existing-central route checks only the row's own framework, but the
+    // inserted versionless PackageReference applies to every framework of the project.
+    [Fact]
+    public void ExistingCentralRouteChecksEveryFrameworkOfTheProject()
+    {
+        var central = Meta($"{Root}/Directory.Packages.props", 3, "2.0.0", "PackageVersion", "Leaf");
+        var a = CpmProj("A", new[] { "net8.0", "net6.0" }, Central("Leaf", "2.0.0", central));
+        var b = CpmProj("B", new[] { "net8.0" }, Central("Leaf", "2.0.0", central), Ref("Leaf", null, null));
+
+        var plan = EditPlanner.Plan(new[] { new UpgradeRow(a.Path, "net8.0", "Leaf", "2.1.0") }, new[] { a, b },
+            (_, _, _) => new[] { Cand("2.1.0", "net8.0") }, new ScanOptions(Transitive: true), Root);
+
+        Assert.Empty(plan.Edits);
+        Assert.Equal("no version fits every project that shares this version", Assert.Single(plan.Skipped).Reason);
+    }
+
+    // Break (#61 gap 2): IdsNeedingCandidates fetches data only for the row's own framework, so the
+    // check above has nothing to read for a framework with its own sources (TFMs with the same
+    // sources share one fetch).
+    [Fact]
+    public void IdsNeedingCandidatesIncludesEveryFrameworkOfAnExistingCentralRow()
+    {
+        var central = Meta($"{Root}/Directory.Packages.props", 3, "2.0.0", "PackageVersion", "Leaf");
+        var items = new[] { Central("Leaf", "2.0.0", central) };
+        var a = new EvaluatedProject($"{Root}/A/A.csproj", "A", new[]
+        {
+            new EvaluatedTfm("net8.0", "", true, false, $"{Root}/Directory.Packages.props", items, Array.Empty<string>()),
+            new EvaluatedTfm("net6.0", "", true, false, $"{Root}/Directory.Packages.props", items, new[] { "/feeds/net6" }),
+        }, new[] { $"{Root}/A/A.csproj" }, null);
+
+        var ids = EditPlanner.IdsNeedingCandidates(new[] { new UpgradeRow(a.Path, "net8.0", "Leaf", "2.1.0") }, new[] { a });
+
+        Assert.Equal(new[] { "net6.0", "net8.0" }, ids.Where(x => x.ProjectPath == a.Path).Select(x => x.Tfm.Framework).OrderBy(f => f));
+    }
+
     [Fact]
     public void TransitiveWithExistingCentralItemSetsCentralAndInsertsReference()
     {
