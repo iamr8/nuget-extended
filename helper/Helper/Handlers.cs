@@ -154,8 +154,14 @@ public sealed class Handlers
                 {
                     var key = GroupKey(w.P.Path, w.T, w.A.Id);
                     candidates.TryGetValue(key, out var c);
+                    var site = SiteResolver.Resolve(w.T, w.A.Id).Site;
                     var row = RowBuilder.Row(w.A, w.Requested, o.CheckUpdates ? c : null, NuGetFramework.Parse(w.T.Framework), o, now)
-                        with { Central = SiteResolver.IsCentral(w.T, w.A.Id) };
+                        with
+                        {
+                            Central = SiteResolver.IsCentral(w.T, w.A.Id),
+                            VersionFile = site?.File,
+                            VersionLine = site?.Line ?? 0,
+                        };
                     // Don't overwrite an existing Reason (bad range text, not resolved): only a row
                     // that would otherwise vanish (no Target, no Reason) gets the source failure.
                     if (row.Target == null && row.Reason == null && groupFailed.TryGetValue(key, out var gf) && gf.Count > 0)
@@ -177,6 +183,7 @@ public sealed class Handlers
         return new ScanResult(projects, stale.Distinct().ToList(), failures, sourceFailures);
     }
 
+    /// The project URL of the target version, else of the newest version that has one.
     public async Task<object> PlanUpgrade(JsonElement raw, IProgress<string> progress, CancellationToken ct)
     {
         PlanParams p;

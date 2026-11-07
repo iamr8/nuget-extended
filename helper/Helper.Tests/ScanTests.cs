@@ -544,6 +544,35 @@ public class ScanTests
         Assert.False(Central("B"));
     }
 
+    // Break: Scan drops where the version is set (file and line) or the feed's project URL.
+    [Fact]
+    public void RowCarriesVersionLocationAndProjectUrl()
+    {
+        var dir = FixtureSolution.NewDir();
+        const string url = "https://github.com/serilog/serilog";
+        var feed = FixtureFeed.Create(dir,
+            new FixtureFeed.Package("Serilog", "3.0.0", Array.Empty<string>(), ProjectUrl: url),
+            new FixtureFeed.Package("Serilog", "4.4.0", Array.Empty<string>(), ProjectUrl: url));
+        FixtureSolution.WriteNuGetConfig(dir, ("local", feed));
+        FixtureSolution.Write(dir, "Directory.Packages.props", @"<Project>
+  <PropertyGroup><ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally></PropertyGroup>
+  <ItemGroup><PackageVersion Include=""Serilog"" Version=""3.0.0"" /></ItemGroup>
+</Project>");
+        FixtureSolution.Write(dir, "A/A.csproj", $@"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup><TargetFramework>{FixtureSolution.Tfm}</TargetFramework></PropertyGroup>
+  <ItemGroup><PackageReference Include=""Serilog"" /></ItemGroup>
+</Project>");
+        var a = Path.Combine(dir, "A/A.csproj");
+        FixtureSolution.Restore(a);
+        using var h = HelperProcess.Start(dir);
+
+        var row = Row(Scan(h, dir, new[] { a }), "Serilog");
+
+        Assert.EndsWith("Directory.Packages.props", row.GetProperty("versionFile").GetString());
+        Assert.Equal(3, row.GetProperty("versionLine").GetInt32());
+        Assert.Equal(url, row.GetProperty("projectUrl").GetString());
+    }
+
     private static void RunExpectSuccess(string exe, string args, string? workingDirectory = null)
     {
         var psi = new ProcessStartInfo(exe, args) { RedirectStandardOutput = true, RedirectStandardError = true };

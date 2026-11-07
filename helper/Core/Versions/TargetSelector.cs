@@ -3,7 +3,8 @@ using NuGet.Versioning;
 
 namespace NuGetExtended.Core.Versions;
 
-public sealed record Candidate(NuGetVersion Version, bool Listed, DateTimeOffset? Published, IReadOnlyList<NuGetFramework> DependencyFrameworks);
+public sealed record Candidate(NuGetVersion Version, bool Listed, DateTimeOffset? Published, IReadOnlyList<NuGetFramework> DependencyFrameworks,
+    string? ProjectUrl = null);
 
 public sealed record Selection(NuGetVersion? Target, NuGetVersion? Capped, bool RestoreOnly);
 

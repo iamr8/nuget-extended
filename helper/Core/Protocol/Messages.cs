@@ -25,7 +25,9 @@ public sealed record ScanParams(string SolutionDir, IReadOnlyList<string> Projec
 public sealed record PackageRow(string Id, string Requested, string? Resolved, string? Target, string Severity,
     string? Capped, bool RestoreOnly, bool Transitive, bool AutoReferenced, string? Reason,
     string? Blocked = null, // Target exists but another id on the same version site lacks it (SharedVersions)
-    bool Central = false); // The version is the CPM central item: an upgrade moves every project that uses it
+    bool Central = false, // The version is the CPM central item: an upgrade moves every project that uses it
+    string? VersionFile = null, int VersionLine = 0, // Where the version is set (1-based line); null for a transitive row
+    string? ProjectUrl = null); // The feed's project URL for the target (or newest) version; only for ids with an update
 
 public sealed record FrameworkRows(string Framework, IReadOnlyList<PackageRow> Packages);
 

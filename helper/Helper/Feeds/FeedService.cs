@@ -157,7 +157,8 @@ public sealed class FeedService : IDisposable
                         m.IsListed,
                         m.Published,
                         (m.DependencySets ?? Enumerable.Empty<NuGet.Packaging.PackageDependencyGroup>())
-                            .Select(g => g.TargetFramework).ToList())).ToList();
+                            .Select(g => g.TargetFramework).ToList(),
+                        m.ProjectUrl?.ToString())).ToList();
                 }, Array.Empty<Candidate>(), ct))).Value);
         }
         foreach (var (list, failure) in await WhenAllSources(pending, ct))

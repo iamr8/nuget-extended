@@ -33,6 +33,15 @@ class ProtocolTest {
         assertTrue(r.sourceFailures.isEmpty())
     }
 
+    // Break: PackageRow misses the location or URL fields, or Gson maps them to other names.
+    @Test
+    fun parsesVersionLocationAndProjectUrl() {
+        val row = gson.fromJson("""{"id":"Serilog","versionFile":"/r/A.csproj","versionLine":7,"projectUrl":"https://serilog.net"}""", PackageRow::class.java)
+        assertEquals("/r/A.csproj", row.versionFile)
+        assertEquals(7, row.versionLine)
+        assertEquals("https://serilog.net", row.projectUrl)
+    }
+
     // Break: PackageRow has no `central` field, or Gson maps it to another name.
     @Test
     fun parsesCentralFlag() {

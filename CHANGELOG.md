@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the package row, because the central version changes for every project. Projects on another
   version (a `VersionOverride`, or a different version without CPM) get a package row per version,
   and each one can be checked alone.
+- **Right-click menu** on list rows. A package row: *Upgrade to {version}*, *Go to Version
+  Definition* (the line in `Directory.Packages.props` or the project file), *Open on nuget.org*,
+  *Open Project Page* (when the feed gives one), *Show in NuGet Window* and *Copy Package Id*.
+  A project row: *Open {Project}.csproj* and *Upgrade All in This Project*.
 
 ### Fixed
 - Upper-only ranges like `(,3.0.0]` no longer fail the scan.

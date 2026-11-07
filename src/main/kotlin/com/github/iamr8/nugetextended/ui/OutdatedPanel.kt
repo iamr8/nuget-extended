@@ -25,6 +25,7 @@ import com.github.iamr8.nugetextended.settings.OutdatedConfigurable
 import com.github.iamr8.nugetextended.settings.OutdatedOptionsService
 import com.intellij.execution.ExecutionException
 import com.intellij.icons.AllIcons
+import com.intellij.ide.BrowserUtil
 import com.intellij.ide.impl.isTrusted
 import com.intellij.notification.NotificationAction
 import com.intellij.notification.NotificationGroupManager
@@ -39,6 +40,7 @@ import com.intellij.openapi.actionSystem.ToggleAction
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.progress.ProgressIndicator
@@ -48,6 +50,7 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.Messages
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.util.text.StringUtil
+import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
@@ -66,7 +69,7 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
     private val engine = HelperService.getInstance(project)
     private val restorer = DotnetRunner()
     private val optionsService = OutdatedOptionsService.getInstance(project)
-    private val listView = PackageListView(onSelectionChanged = { toolbar.updateActionsAsync() })
+    private val listView = PackageListView(onSelectionChanged = { toolbar.updateActionsAsync() }, onMenuItem = ::runMenuItem)
     private val status = JBLabel(" ")
 
     private val toolbar: ActionToolbar = buildToolbar()
@@ -455,9 +458,31 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
         notifyFailure("Some package sources failed", lines, NotificationType.INFORMATION, updateStatus = false)
     }
 
-    private fun runUpgrade() {
+    /** Runs a row-menu item. EDT only. */
+    private fun runMenuItem(item: MenuItem) {
+        when (item) {
+            is MenuItem.Upgrade -> runUpgrade(item.rows)
+            is MenuItem.UpgradeProject -> runUpgrade(item.rows)
+            is MenuItem.GoToVersion -> openFile(item.file, item.line)
+            is MenuItem.OpenProjectFile -> openFile(item.path, 0)
+            is MenuItem.OpenUrl -> BrowserUtil.browse(item.url)
+            is MenuItem.CopyId -> CopyPasteManager.getInstance().setContents(StringSelection(item.id))
+            is MenuItem.ShowInNuGet -> {
+                // Rider has no public API to select a package in its NuGet window: open it, with the id ready to paste in its search.
+                CopyPasteManager.getInstance().setContents(StringSelection(item.id))
+                ToolWindowManager.getInstance(project).getToolWindow(RIDER_NUGET_TOOL_WINDOW)?.activate(null)
+            }
+        }
+    }
+
+    /** Opens [path] at the 1-based [line] (0 = the top). */
+    private fun openFile(path: String, line: Int) {
+        val file = EditApplier.findLocal(path) ?: return
+        OpenFileDescriptor(project, file, (line - 1).coerceAtLeast(0), 0).navigate(true)
+    }
+
+    private fun runUpgrade(checked: List<CheckedRow> = listView.checkedRows()) {
         if (busy) return
-        val checked = listView.checkedRows()
         if (checked.isEmpty()) return
 
         busy = true
@@ -694,6 +719,8 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     companion object {
+        /** Id of Rider's own NuGet tool window. */
+        private const val RIDER_NUGET_TOOL_WINDOW = "NuGet"
         private val LOG = logger<OutdatedPanel>()
         private const val MIN_TIMEOUT_SECONDS = 30
         /** Must match the <notificationGroup id="…"> in plugin.xml. */

@@ -46,6 +46,11 @@ public static class RowBuilder
             s.RestoreOnly,
             !asset.Direct,
             asset.AutoReferenced,
-            s.Target == null && s.Capped != null ? (range.IsFloating ? "capped by floating version" : "capped by range") : null);
+            s.Target == null && s.Capped != null ? (range.IsFloating ? "capped by floating version" : "capped by range") : null)
+        {
+            // The target's page, else the newest version that has one.
+            ProjectUrl = candidates.FirstOrDefault(c => c.Version == s.Target && c.ProjectUrl != null)?.ProjectUrl
+                ?? candidates.Where(c => c.ProjectUrl != null).MaxBy(c => c.Version)?.ProjectUrl,
+        };
     }
 }
