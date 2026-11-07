@@ -39,6 +39,9 @@ public static class EditPlanner
         // existing central item): held back until the site's target is actually picked, so a
         // skipped set never leaves an orphan insert behind (or vice versa).
         var pendingInserts = new Dictionary<string, List<Edit>>();
+        // New central PackageVersion inserts by (central file, id): projects that insert the same item
+        // must agree on one version that every one of them supports (#61), so they are planned together.
+        var centralInserts = new Dictionary<(string, string), List<(UpgradeRow Row, EvaluatedProject Project, EvaluatedTfm Tfm)>>();
 
         var bySite = new Dictionary<string, List<UpgradeRow>>();
         foreach (var row in rows)
@@ -55,12 +58,14 @@ public static class EditPlanner
                 // No PackageReference/GlobalPackageReference anywhere in this TFM, and (under CPM)
                 // no existing central item either: a genuinely new dependency, handled by Inserts.
                 if (!options.Transitive) { skipped.Add(new Skip(row.Project, row.Id, "transitive package - enable transitive upgrades")); continue; }
-                // The inserted reference applies to every TFM of the project, not only the row's. Without
-                // candidate data for a TFM there is nothing to check (same as Accepts).
-                var wanted = NuGetVersion.Parse(row.Target);
-                bool Supported(EvaluatedTfm t) =>
-                    candidates(project.Path, t, row.Id).FirstOrDefault(x => x.Version == wanted) is not { } known || SupportsTfm(t, known);
-                if (!project.Frameworks.All(Supported))
+                if (tfm.CpmEnabled && tfm.CentralFile != null)
+                {
+                    var insertKey = (tfm.CentralFile.ToLowerInvariant(), row.Id.ToLowerInvariant());
+                    if (!centralInserts.TryGetValue(insertKey, out var group)) centralInserts[insertKey] = group = new();
+                    group.Add((row, project, tfm));
+                    continue;
+                }
+                if (!FitsEveryFramework(project, row.Id, NuGetVersion.Parse(row.Target), candidates))
                 {
                     skipped.Add(new Skip(row.Project, row.Id, "the new version does not support every target framework of this project"));
                     continue;
@@ -94,8 +99,9 @@ public static class EditPlanner
                 // (or, with TransitivePinning, it inherits the central version once restored): count
                 // it as a consumer so the TFM and known-version checks apply to it too - otherwise a
                 // site with no other, pre-existing consumer would validate against an empty list.
+                // One consumer per TFM: the inserted versionless reference applies to every TFM of the project (#61).
                 if (!consumers.TryGetValue(centralKey, out var consumerList)) consumers[centralKey] = consumerList = new List<Consumer>();
-                consumerList.Add(new Consumer(project.Path, tfm, row.Id, null));
+                foreach (var t in project.Frameworks) consumerList.Add(new Consumer(project.Path, t, row.Id, null));
                 // A's own restore need (a new direct or transitively-pinned dependency on the site)
                 // does not depend on whether the central set edit itself is picked.
                 restore.Add(project.Path);
@@ -111,6 +117,27 @@ public static class EditPlanner
             var key = SiteResolver.Key(site);
             if (!bySite.TryGetValue(key, out var list)) bySite[key] = list = new List<UpgradeRow>();
             list.Add(row);
+        }
+
+        foreach (var group in centralInserts.Values)
+        {
+            // The highest asked-for version that every inserting project supports on all its TFMs.
+            var target = group.Select(g => g.Row.Target).Distinct()
+                .OrderByDescending(NuGetVersion.Parse)
+                .FirstOrDefault(t => group.All(g => FitsEveryFramework(g.Project, g.Row.Id, NuGetVersion.Parse(t), candidates)));
+            if (target == null)
+            {
+                var reason = group.Count == 1
+                    ? "the new version does not support every target framework of this project"
+                    : "no version supports every target framework of the projects that get this package";
+                group.ForEach(g => skipped.Add(new Skip(g.Row.Project, g.Row.Id, reason)));
+                continue;
+            }
+            foreach (var (row, project, tfm) in group)
+            {
+                var inserts = Inserts(project, tfm, row with { Target = target }, skipped, repo).ToList();
+                if (inserts.Count > 0) { edits.AddRange(inserts); restore.Add(project.Path); }
+            }
         }
 
         foreach (var (key, siteRows) in bySite)
@@ -187,7 +214,7 @@ public static class EditPlanner
             var tfm = project.Frameworks.FirstOrDefault(f => f.Framework == row.Framework);
             if (tfm == null) continue;
 
-            var (site, _, transitive, _) = ResolveRowSite(tfm, row.Id);
+            var (site, _, transitive, viaExistingCentral) = ResolveRowSite(tfm, row.Id);
             if (transitive)
             {
                 // A new reference has no site, but Plan checks its target against the project's frameworks.
@@ -201,6 +228,8 @@ public static class EditPlanner
             // routed to an existing CPM central item): Plan counts it as a synthetic consumer there
             // (see the ViaExistingCentral branch), and its TFM/known-version check needs this data.
             Add(project.Path, tfm, row.Id);
+            // Plan checks such a row on every TFM of the project, since the inserted reference applies to all.
+            if (viaExistingCentral) foreach (var t in project.Frameworks) Add(project.Path, t, row.Id);
         }
         return result.Values.ToList();
     }
@@ -266,6 +295,12 @@ public static class EditPlanner
         if (candidate == null) return !needsKnownVersionCheck;
         return SupportsTfm(c.Tfm, candidate);
     }
+
+    /// Whether [version] of [id] supports every TFM of [project]: a new reference applies to all of
+    /// them, not only the row's. Without candidate data for a TFM there is nothing to check (same as Accepts).
+    private static bool FitsEveryFramework(EvaluatedProject project, string id, NuGetVersion version,
+        Func<string, EvaluatedTfm, string, IReadOnlyList<Candidate>> candidates) =>
+        project.Frameworks.All(t => candidates(project.Path, t, id).FirstOrDefault(x => x.Version == version) is not { } known || SupportsTfm(t, known));
 
     private static bool SupportsTfm(EvaluatedTfm t, Candidate candidate) =>
         // An empty TFM string (should not occur in real evaluated data, but must never crash the

@@ -76,6 +76,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A package source that offers only registration types your SDK's NuGet does not know (for example
   a private feed on an older SDK) is now reported as a failed source. It no longer opens the IDE
   error dialog.
+- Transitive upgrades check the version that ends up in the file against every target framework.
+  When two projects add the same new central version, it is the highest version both support.
+  A package added next to an existing central version is checked on every framework of the project.
 
 ## [0.1.4] - 2026-08-29
 
