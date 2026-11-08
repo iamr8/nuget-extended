@@ -80,6 +80,8 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
     private var updatesChecked = false
     private var skippedProjects = 0
     private var busy = false
+    /** EDT only: the scope changed while a scan ran, so the list loads again when it ends. */
+    private var relistAfterScan = false
     private var listedOnce = false
     /** True while the solution file is unreadable, so its balloon shows once per failure streak. Declared before `init`. */
     @Volatile private var solutionUnreadable = false
@@ -145,24 +147,26 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
     }
 
     /**
-     * Re-reads the solution so projects added or removed since the last scan are seen, and keeps the
-     * user's scope (see [mergeScope]). Background thread only: it reads files and touches no UI.
-     * The toolbar is refreshed when the task ends. When the solution file cannot be read (permission,
-     * a sharing lock), the last known solution and scope stay, and the scan goes on with them.
+     * Re-reads the solution so projects added or removed since the last scan are seen, and returns
+     * it with this scan's scope (see [mergeScope]). Background thread only: it reads files and touches
+     * no UI. The saved scope is merged on the EDT, where the scope picker also writes it, so a pick
+     * made during the scan is not lost (#60). When the solution file cannot be read (permission, a
+     * sharing lock), the last known solution and scope stay, and the scan goes on with them.
      */
-    private fun refreshSolution(): Solution? {
+    private fun refreshSolution(): Pair<Solution?, Set<String>> {
         val known = solution
         val before = known?.projects?.map { it.key }.orEmpty()
         val fresh = try {
             SolutionModel.discover(File(basePath()), project.name)
         } catch (e: IOException) {
             solutionReadFailed(e, known = known != null)
-            return known
+            return known to includedProjects.toSet()
         }
         solutionUnreadable = false
-        includedProjects = mergeScope(includedProjects, before, fresh?.projects?.map { it.key }.orEmpty())
+        val after = fresh?.projects?.map { it.key }.orEmpty()
         solution = fresh
-        return fresh
+        onEdt { includedProjects = mergeScope(includedProjects, before, after) }
+        return fresh to mergeScope(includedProjects, before, after)
     }
 
     /**
@@ -281,15 +285,15 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
             .createPopup()
         val before = includedProjects.toSet()
         popup.setFinalRunnable {
-            var next = projects.indices
-                .filter { boxes[it].isSelected }
-                .map { projects[it].key }
-                .toMutableSet()
-            if (next.isEmpty()) next = projects.map { it.key }.toMutableSet()
+            val picked = projects.indices.filter { boxes[it].isSelected }.map { projects[it].key }.toSet()
+            // A scan may have re-read the solution while the popup was open.
+            val current = solution?.projects?.map { it.key } ?: projects.map { it.key }
+            val next = pickedScope(picked, projects.map { it.key }, current)
             if (next != before) {
                 includedProjects = next
                 toolbar.updateActionsAsync()
-                runListPackages() // re-list only when the selection actually changed
+                // Re-list only when the selection actually changed; after the running scan if there is one.
+                if (busy) relistAfterScan = true else runListPackages()
             }
         }
         popup.showUnderneathOf(anchor)
@@ -304,6 +308,7 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun runScanTask(checkUpdates: Boolean) {
         if (busy) return
         busy = true
+        relistAfterScan = false // this scan reads the current scope
         toolbar.updateActionsAsync()
         setStatus(if (checkUpdates) "Checking for updates…" else "Finding packages…")
         FileDocumentManager.getInstance().saveAllDocuments() // the engine reads project files from disk
@@ -323,8 +328,8 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
                 indicator.isIndeterminate = true
                 // Discovery reads the solution and may walk the tree, so it runs here, not on the EDT.
                 indicator.text = "Finding projects…"
-                val sln = refreshSolution()
-                val paths = enginePaths(ScanPlan.projectPaths(sln, includedProjects, File(basePath()), options.recursive, options.includeFileBasedApps), trusted)
+                val (sln, scope) = refreshSolution()
+                val paths = enginePaths(ScanPlan.projectPaths(sln, scope, File(basePath()), options.recursive, options.includeFileBasedApps), trusted)
                 indicator.text = "Analyzing ${paths.size} project(s)…"
                 var result = scanOnce(paths, options, checkUpdates, indicator)
                 var restoreFailed = false
@@ -352,6 +357,7 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
                 busy = false
                 finishScan(rows, failures, checkUpdates, hardFailContext, skipContext)
                 notifySources(sources)
+                relistIfScopeChanged()
             }
 
             override fun onCancel() = cancelled()
@@ -360,8 +366,16 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
                 busy = false
                 reportEngineError(hardFailContext, error)
                 toolbar.updateActionsAsync()
+                relistIfScopeChanged()
             }
         })
+    }
+
+    /** EDT only: loads the list again when the scope picker changed the scope during the scan that just ended. */
+    private fun relistIfScopeChanged() {
+        if (!relistAfterScan) return
+        relistAfterScan = false
+        runListPackages()
     }
 
     private fun scanOnce(paths: List<String>, options: OutdatedOptions, checkUpdates: Boolean, indicator: ProgressIndicator): ScanResult =
@@ -480,7 +494,7 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
 
             override fun run(indicator: ProgressIndicator) {
                 // Re-read first: the restore after the upgrade also reads the solution.
-                val sln = refreshSolution()
+                val sln = refreshSolution().first
                 if (rows.isEmpty()) return
                 // Every solution project may share a version with a checked row, so all are consumers.
                 val allIncluded = sln?.projects?.map { it.key }?.toSet().orEmpty()
@@ -577,6 +591,7 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
         busy = false
         setStatus("Cancelled.")
         toolbar.updateActionsAsync()
+        relistIfScopeChanged()
     }
 
     /** Builds a [ScanFailure]: short summary for the UI, raw output kept for "Copy Details". */
@@ -742,6 +757,13 @@ internal fun mergeScope(oldIncluded: Set<String>, oldKeys: List<String>, newKeys
     val merged = newKeys.filterTo(linkedSetOf()) { it in oldIncluded || it !in oldKeys }
     return if (merged.isEmpty()) newKeys.toMutableSet() else merged
 }
+
+/**
+ * Pure: the scope the picker saves. [picked] came from the popup's [shownKeys] (empty means all); a
+ * project added since the popup opened ([currentKeys]) joins, as in [mergeScope].
+ */
+internal fun pickedScope(picked: Set<String>, shownKeys: List<String>, currentKeys: List<String>): MutableSet<String> =
+    mergeScope(picked.ifEmpty { shownKeys.toSet() }, shownKeys, currentKeys)
 
 /** Pure: restore runs the repository's MSBuild targets, so only a trusted project with restore on gets it. */
 internal fun restoreAllowed(trusted: Boolean, noRestore: Boolean): Boolean = trusted && !noRestore

@@ -143,6 +143,23 @@ class OutdatedPanelLogicTest {
         assertEquals(listOf("B"), result.toList())
     }
 
+    // --- pickedScope ----------------------------------------------------------
+
+    @Test
+    fun `a project added while the picker was open joins the picked scope`() {
+        // Break: the picker saves its checkboxes as they are, so a scan that re-read the solution
+        // while the popup was open loses the new project (#60).
+        val result = pickedScope(setOf("A"), listOf("A", "B"), listOf("A", "B", "C"))
+        assertEquals(listOf("A", "C"), result.toList())
+    }
+
+    @Test
+    fun `an empty pick means every current project`() {
+        // Break: an empty pick falls back to the projects the popup showed, not the current ones.
+        val result = pickedScope(emptySet(), listOf("A", "B"), listOf("A", "B", "C"))
+        assertEquals(listOf("A", "B", "C"), result.toList())
+    }
+
     // --- internalErrorDetails -------------------------------------------------
 
     @Test
