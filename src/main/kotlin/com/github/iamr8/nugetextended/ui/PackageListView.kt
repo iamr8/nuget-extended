@@ -219,6 +219,10 @@ internal object PackageListLogic {
         return if (hidden.isEmpty()) entries else entries.filterNot { it in hidden }
     }
 
+    /** Groups a search opened that close again when it ends: all but the group holding the [found] row. */
+    fun closeAfterSearch(opened: List<GroupEntry>, found: ListEntry?): List<GroupEntry> =
+        opened.filterNot { g -> g.packages.any { it === found } }
+
     /** True when at least one row is checkable. */
     fun hasOutdated(entries: List<ListEntry>): Boolean = outdatedEntries(entries).isNotEmpty()
 
@@ -282,6 +286,8 @@ internal class PackageListView(
     private val model = DefaultListModel<ListEntry>()
     /** Every entry, also the rows of collapsed groups (checks act on them too); the model holds only the shown ones. */
     private var all: List<ListEntry> = emptyList()
+    /** Groups a running search opened; null when no search runs. */
+    private var openedForSearch: List<GroupEntry>? = null
 
     /** What the rows show besides names and versions; a change only repaints (checks stay). */
     var display = ListDisplay()
@@ -342,7 +348,24 @@ internal class PackageListView(
             }
         })
         // Rider-style speed search: hidden until you type, then filters/navigates by text.
-        ListSpeedSearch.installOn(list) { PackageListLogic.searchText(it) }
+        val search = ListSpeedSearch.installOn(list) { PackageListLogic.searchText(it) }
+        // Search sees only shown rows: open every group while it runs, then close them again
+        // except the one holding the found row.
+        search.addChangeListener {
+            val opened = openedForSearch
+            if (search.isPopupActive && opened == null) {
+                val closed = all.filterIsInstance<GroupEntry>().filter { it.collapsed }
+                openedForSearch = closed
+                if (closed.isNotEmpty()) {
+                    setCollapsed(closed, false)
+                    search.refreshSelection() // the first key searched before the rows were shown
+                }
+            } else if (!search.isPopupActive && opened != null) {
+                openedForSearch = null
+                setCollapsed(PackageListLogic.closeAfterSearch(opened, list.selectedValue), true)
+                list.ensureIndexIsVisible(list.selectedIndex)
+            }
+        }
     }
 
     val component: JComponent get() = list
@@ -350,6 +373,7 @@ internal class PackageListView(
     /** Rebuilds the list (checks are cleared): grouped by package when [byPackage], else by project. */
     fun setData(sections: List<PackageSection>, byPackage: Boolean = false, collapsed: Boolean = false) {
         all = if (byPackage) PackageListLogic.buildByPackage(sections) else PackageListLogic.buildEntries(sections)
+        openedForSearch = null
         setAllCollapsed(collapsed)
     }
 

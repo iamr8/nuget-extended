@@ -54,7 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   version or `$(Name)` only when it differs from its package row.
 - **Collapsible groups.** A chevron before each project header and package row closes or opens
   it (Left and Right keys too). Groups start collapsed; the eye menu's **Collapse Groups by
-  Default** turns that off.
+  Default** turns that off. Typing to search also finds rows in closed groups and opens the
+  group of the found row.
 
 ### Fixed
 - Upper-only ranges like `(,3.0.0]` no longer fail the scan.

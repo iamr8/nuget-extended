@@ -503,4 +503,22 @@ class PackageListLogicTest {
         byPackage.filterIsInstance<PackageGroupEntry>().first { it.id == "X" }.collapsed = true
         assertEquals(listOf("X", "Y", "A"), PackageListLogic.visible(byPackage).map(::name))
     }
+
+    // Break: a search that ends closes the group of the row it found, or leaves other groups open.
+    @Test
+    fun searchEndClosesTheGroupsItOpenedExceptTheFoundOne() {
+        val sections = listOf(
+            section("A", "net8.0", "/a.csproj", listOf(dep("X"))),
+            section("B", "net8.0", "/b.csproj", listOf(dep("Y"), dep("Z"))),
+            section("C", "net8.0", "/c.csproj", listOf(dep("Z"))),
+        )
+        val headers = PackageListLogic.buildEntries(sections).filterIsInstance<HeaderEntry>()
+        val (a, b, c) = headers
+        val foundInB = b.packages.first { it.dep.name == "Z" }
+
+        assertEquals(listOf(a, c), PackageListLogic.closeAfterSearch(headers, foundInB))
+        // A found group row is shown when closed, so its group closes too.
+        assertEquals(headers, PackageListLogic.closeAfterSearch(headers, b))
+        assertEquals(headers, PackageListLogic.closeAfterSearch(headers, null))
+    }
 }
