@@ -44,6 +44,7 @@ It was called *dotnet outdated GUI* before.
   version, or open the package on nuget.org or its project page.
 - **Recommendations.** After an update check, a banner lists packages with a new major version.
   Click one to jump to it and check it. The eye menu turns it off.
+- **Collapsible groups.** Chevrons open and close projects and packages; groups start collapsed.
 - **Shared `$(Name)` versions.** The eye menu can show the property name. Packages on one property check
   together, because one edit moves them all.
 - **A plan before each change.** A dialog shows the files, the packages that share a version, and

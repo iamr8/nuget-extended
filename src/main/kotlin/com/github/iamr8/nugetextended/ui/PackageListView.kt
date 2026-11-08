@@ -20,6 +20,7 @@ import com.intellij.ui.components.JBList
 import com.intellij.ui.speedSearch.SpeedSearchUtil
 import com.intellij.util.ui.JBUI
 import com.intellij.util.ui.ThreeStateCheckBox
+import com.intellij.util.ui.UIUtil
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Component
@@ -50,7 +51,10 @@ fun SeverityColor.toJBColor(): Color = when (this) {
 
 internal sealed class ListEntry
 /** A row with a three-state checkbox over its own package rows. */
-internal sealed class GroupEntry(val packages: List<PackageEntry>) : ListEntry()
+internal sealed class GroupEntry(val packages: List<PackageEntry>) : ListEntry() {
+    /** Its package rows are hidden (the chevron points right). */
+    var collapsed: Boolean = false
+}
 /** A `Project · framework` section header carrying its own package rows for the section toggle. */
 internal class HeaderEntry(val label: ProjectLabel, packages: List<PackageEntry>) : GroupEntry(packages) {
     /** The full title (with the framework): what speed search matches. */
@@ -209,6 +213,12 @@ internal object PackageListLogic {
         return (targets + outdatedEntries(entries).filter { site(it) in sites }).distinct()
     }
 
+    /** The entries the list shows: rows of a collapsed group are left out. */
+    fun visible(entries: List<ListEntry>): List<ListEntry> {
+        val hidden = entries.filterIsInstance<GroupEntry>().filter { it.collapsed }.flatMapTo(HashSet<ListEntry>()) { it.packages }
+        return if (hidden.isEmpty()) entries else entries.filterNot { it in hidden }
+    }
+
     /** True when at least one row is checkable. */
     fun hasOutdated(entries: List<ListEntry>): Boolean = outdatedEntries(entries).isNotEmpty()
 
@@ -270,6 +280,8 @@ internal class PackageListView(
 ) {
 
     private val model = DefaultListModel<ListEntry>()
+    /** Every entry, also the rows of collapsed groups (checks act on them too); the model holds only the shown ones. */
+    private var all: List<ListEntry> = emptyList()
 
     /** What the rows show besides names and versions; a change only repaints (checks stay). */
     var display = ListDisplay()
@@ -296,11 +308,17 @@ internal class PackageListView(
                     } else if (e.x <= checkboxEnd(entry)) {
                         toggle(PackageListLogic.toggleTargets(entry))
                     }
-                    // The section or package checkbox toggles every outdated package under it.
-                    is GroupEntry -> if (e.x <= CHECKBOX_HIT_WIDTH) toggle(PackageListLogic.toggleTargets(entry))
+                    // The chevron opens or closes the group; the checkbox after it toggles every outdated package under it.
+                    is GroupEntry -> when {
+                        e.x <= JBUI.scale(CHEVRON_HIT_WIDTH) -> setCollapsed(entry, !entry.collapsed)
+                        e.x <= JBUI.scale(CHEVRON_HIT_WIDTH) + CHECKBOX_HIT_WIDTH -> toggle(PackageListLogic.toggleTargets(entry))
+                    }
                 }
             }
         })
+        // Left closes and Right opens the selected package rows, as in a tree.
+        list.registerKeyboardAction({ selectedGroups().forEach { setCollapsed(it, true) } }, KeyStroke.getKeyStroke("LEFT"), JComponent.WHEN_FOCUSED)
+        list.registerKeyboardAction({ selectedGroups().forEach { setCollapsed(it, false) } }, KeyStroke.getKeyStroke("RIGHT"), JComponent.WHEN_FOCUSED)
         // Space toggles the checkbox on all selected outdated rows.
         list.registerKeyboardAction(
             { toggleCheckedForSelection() },
@@ -330,9 +348,31 @@ internal class PackageListView(
     val component: JComponent get() = list
 
     /** Rebuilds the list (checks are cleared): grouped by package when [byPackage], else by project. */
-    fun setData(sections: List<PackageSection>, byPackage: Boolean = false) {
+    fun setData(sections: List<PackageSection>, byPackage: Boolean = false, collapsed: Boolean = false) {
+        all = if (byPackage) PackageListLogic.buildByPackage(sections) else PackageListLogic.buildEntries(sections)
+        all.filterIsInstance<GroupEntry>().forEach { it.collapsed = collapsed }
+        showVisible()
+    }
+
+    /** Collapses or expands every group; checks stay. */
+    fun setAllCollapsed(collapsed: Boolean) {
+        all.filterIsInstance<GroupEntry>().forEach { it.collapsed = collapsed }
+        showVisible()
+    }
+
+    private fun setCollapsed(group: GroupEntry, collapsed: Boolean) {
+        if (group.collapsed == collapsed) return
+        group.collapsed = collapsed
+        showVisible()
+        if (group is PackageGroupEntry) list.selectedIndex = model.indexOf(group) // headers are never selected
+    }
+
+    private fun selectedGroups(): List<GroupEntry> = list.selectedValuesList.filterIsInstance<GroupEntry>()
+
+    /** Rebuilds the model from [all] without the rows of collapsed groups. */
+    private fun showVisible() {
         model.clear()
-        model.addAll(if (byPackage) PackageListLogic.buildByPackage(sections) else PackageListLogic.buildEntries(sections))
+        model.addAll(PackageListLogic.visible(all))
     }
 
     fun hasChecked(): Boolean = PackageListLogic.hasChecked(entries())
@@ -348,11 +388,14 @@ internal class PackageListView(
 
     /** Checks the major rows of [id] and scrolls to its package row. */
     fun recommend(id: String) {
-        val all = entries()
         val r = PackageListLogic.recommend(all, id)
         if (r.index < 0) return
-        list.selectedIndex = r.index
-        list.ensureIndexIsVisible(r.index)
+        // Open the groups that hold its rows, so the rows it checks can be seen.
+        all.filterIsInstance<GroupEntry>().filter { g -> g.packages.any { it in r.rows } }.forEach { it.collapsed = false }
+        showVisible()
+        val index = model.indexOf(all[r.index])
+        list.selectedIndex = index
+        list.ensureIndexIsVisible(index)
         setChecked(PackageListLogic.withShared(r.rows, all), true)
     }
 
@@ -377,7 +420,7 @@ internal class PackageListView(
 
     /** Right edge of the checkbox click area: a child row's checkbox is indented. */
     private fun checkboxEnd(entry: PackageEntry): Int =
-        CHECKBOX_HIT_WIDTH + if (entry.child != null) JBUI.scale(CHILD_INDENT) else 0
+        CHECKBOX_HIT_WIDTH + JBUI.scale(CHILD_INDENT) // every package row sits under a group
 
     /** Checked outdated rows for the upgrade. */
     fun checkedRows(): List<CheckedRow> = PackageListLogic.checkedRows(entries())
@@ -396,7 +439,7 @@ internal class PackageListView(
             .show(RelativePoint(e), Balloon.Position.below)
     }
 
-    private fun entries(): List<ListEntry> = (0 until model.size()).map { model.getElementAt(it) }
+    private fun entries(): List<ListEntry> = all
 
     /** Headers aren't actionable; keep them out of the selection. */
     private fun dropHeaderSelections() {
@@ -412,6 +455,12 @@ internal class PackageListView(
             border = JBUI.Borders.emptyRight(6)
         }
         private val headerWest = JPanel().apply {
+            isOpaque = false
+            layout = BoxLayout(this, BoxLayout.X_AXIS)
+        }
+        private val headerChevron = JLabel().apply { border = JBUI.Borders.emptyRight(4) }
+        private val groupChevron = JLabel().apply { border = JBUI.Borders.emptyRight(4) }
+        private val groupLead = JPanel().apply {
             isOpaque = false
             layout = BoxLayout(this, BoxLayout.X_AXIS)
         }
@@ -440,10 +489,13 @@ internal class PackageListView(
             westPanel.add(checkBox, BorderLayout.WEST)
             westPanel.add(left, BorderLayout.CENTER)
             westPanel.add(info, BorderLayout.EAST)
+            headerWest.add(headerChevron)
             headerWest.add(headerCheck)
             headerWest.add(header)
             headerPanel.add(headerWest, BorderLayout.WEST)
-            groupWest.add(groupCheck, BorderLayout.WEST)
+            groupLead.add(groupChevron)
+            groupLead.add(groupCheck)
+            groupWest.add(groupLead, BorderLayout.WEST)
             groupWest.add(groupLeft, BorderLayout.CENTER)
             groupPanel.add(groupWest, BorderLayout.CENTER)
             groupPanel.add(groupRight, BorderLayout.EAST)
@@ -466,6 +518,7 @@ internal class PackageListView(
                 // greyed when nothing is checkable, so headers stay aligned (matches the row checkboxes).
                 headerCheck.isEnabled = PackageListLogic.sectionHasOutdated(entry)
                 headerCheck.state = checkState(entry)
+                headerChevron.icon = chevron(entry)
                 header.clear()
                 header.append(entry.label.text(display().showFramework), SimpleTextAttributes.GRAYED_BOLD_ATTRIBUTES)
                 // Highlight the speed-search match inside the header title, like Rider's own lists.
@@ -480,6 +533,7 @@ internal class PackageListView(
                 groupCheck.background = bg
                 groupCheck.isEnabled = PackageListLogic.sectionHasOutdated(entry)
                 groupCheck.state = checkState(entry)
+                groupChevron.icon = chevron(entry)
                 val summary = entry.summary
                 groupLeft.clear()
                 groupRight.clear()
@@ -506,7 +560,7 @@ internal class PackageListView(
                 rowPanel.isOpaque = true
                 rowPanel.background = bg
                 val child = entry.child
-                rowPanel.border = if (child != null) childBorder else rowBorder
+                rowPanel.border = childBorder // every package row sits under a group
                 rowPanel.toolTipText = if (entry.followsGroup && entry.dep.outdated) CENTRAL_NOTE else entry.dep.note
                 checkBox.background = bg
                 // Only outdated packages are checkable; a central child follows its package row.
@@ -550,6 +604,8 @@ internal class PackageListView(
             }
         }
 
+        private fun chevron(group: GroupEntry) = if (group.collapsed) UIUtil.getTreeCollapsedIcon() else UIUtil.getTreeExpandedIcon()
+
         private fun checkState(group: GroupEntry): ThreeStateCheckBox.State = when (PackageListLogic.sectionCheckState(group)) {
             CheckState.ALL -> ThreeStateCheckBox.State.SELECTED
             CheckState.SOME -> ThreeStateCheckBox.State.DONT_CARE
@@ -592,7 +648,8 @@ internal class PackageListView(
 
     private companion object {
         const val CHECKBOX_HIT_WIDTH = 32 // left px region that toggles the checkbox
-        const val CHILD_INDENT = 22 // extra left inset of a child row in the by-package view
+        const val CHILD_INDENT = 22 // extra left inset of a package row under its group
+        const val CHEVRON_HIT_WIDTH = 28 // left px region of a group row that opens or closes it
         const val CENTRAL_NOTE = "Set in the central package file, so it changes for every project. Use the package row."
     }
 }

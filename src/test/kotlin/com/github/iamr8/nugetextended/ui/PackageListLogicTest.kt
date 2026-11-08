@@ -481,4 +481,26 @@ class PackageListLogicTest {
         assertEquals("LibVersion", sameSummary.variable)
         assertEquals(ChildParts(null, null, null), PackageListLogic.childParts(same.packages.first(), sameSummary, showVariable = true))
     }
+
+    // Break: visible() keeps the rows of a collapsed group, or hides the rows of an open one.
+    @Test
+    fun collapsedGroupHidesItsRowsInBothViews() {
+        fun name(e: ListEntry) = when (e) {
+            is HeaderEntry -> e.label.name
+            is PackageGroupEntry -> e.id
+            is PackageEntry -> e.child?.name ?: e.dep.name
+        }
+        val sections = listOf(
+            section("A", "net8.0", "/a.csproj", listOf(dep("X"), dep("Y"))),
+            section("B", "net8.0", "/b.csproj", listOf(dep("X"))),
+        )
+
+        val byProject = PackageListLogic.buildEntries(sections)
+        byProject.filterIsInstance<HeaderEntry>().first { it.label.name == "A" }.collapsed = true
+        assertEquals(listOf("A", "B", "X"), PackageListLogic.visible(byProject).map(::name))
+
+        val byPackage = PackageListLogic.buildByPackage(sections)
+        byPackage.filterIsInstance<PackageGroupEntry>().first { it.id == "X" }.collapsed = true
+        assertEquals(listOf("X", "Y", "A"), PackageListLogic.visible(byPackage).map(::name))
+    }
 }

@@ -49,6 +49,7 @@ class OutdatedOptionsPersistenceTest {
             showRecommendations = false,
             showFramework = true,
             showVariable = true,
+            collapseGroups = false,
         )
         assertEquals(o, roundTrip(o))
     }
