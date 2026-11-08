@@ -98,31 +98,32 @@ public sealed class Server
     private async Task Execute(Request req, Handler handler, CancellationTokenSource cts, bool exclusive)
     {
         var progress = new Progress<string>(text => Write(new EventLine("progress", new { text }, req.Id)));
+        ResponseLine response;
         try
         {
             var result = await handler(req.Params, progress, cts.Token);
-            Write(new ResponseLine(req.Id, result, null));
+            response = new ResponseLine(req.Id, result, null);
         }
         catch (OperationCanceledException)
         {
-            Write(new ResponseLine(req.Id, null, new ErrorInfo("cancelled", "Cancelled.", null)));
+            response = new ResponseLine(req.Id, null, new ErrorInfo("cancelled", "Cancelled.", null));
         }
         catch (UserException e)
         {
-            Write(new ResponseLine(req.Id, null, new ErrorInfo("user", e.Message, e.Details)));
+            response = new ResponseLine(req.Id, null, new ErrorInfo("user", e.Message, e.Details));
         }
         catch (Exception e)
         {
-            Write(new ResponseLine(req.Id, null, new ErrorInfo("bug", e.Message, e.ToString())));
+            response = new ResponseLine(req.Id, null, new ErrorInfo("bug", e.Message, e.ToString()));
         }
-        finally
+        // Free the slot before the response goes out: a client may send its next request as soon
+        // as it reads this line, and must not get "busy".
+        lock (_activeLock)
         {
-            lock (_activeLock)
-            {
-                if (exclusive && _active == cts) { _active = null; _activeId = 0; }
-            }
-            cts.Dispose();
+            if (exclusive && _active == cts) { _active = null; _activeId = 0; }
         }
+        cts.Dispose();
+        Write(response);
     }
 
     private void CancelActive()
