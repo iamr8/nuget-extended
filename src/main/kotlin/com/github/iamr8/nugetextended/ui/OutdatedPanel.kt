@@ -277,24 +277,24 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
     private fun notificationGroup() =
         NotificationGroupManager.getInstance().getNotificationGroup(NOTIFICATION_GROUP)
 
+    private fun plural(n: Int, word: String) = if (n == 1) "1 $word" else "$n ${word}s"
+
     /** Render the list from [allRows] and update the status line. EDT only. */
     private fun render() {
         listView.display = display()
         listView.setData(allRows, optionsService.options.groupByPackage, optionsService.options.collapseGroups)
-        val total = allRows.sumOf { it.deps.size }
-        val projects = allRows.map { it.projectName }.distinct().size
-        val outdated = allRows.sumOf { s -> s.deps.count { it.outdated } }
-        val blocked = allRows.sumOf { s -> s.deps.count { it.blocked != null } }
-        val blockedText = if (blocked > 0) ", $blocked blocked by a shared version" else ""
+        val c = OutdatedRows.counts(allRows)
+        val listed = "${plural(c.packages, "package")} in ${plural(c.projects, "project")}"
+        val blockedText = if (c.blocked > 0) ", ${c.blocked} blocked by a shared version" else ""
         val skipped = if (skippedProjects > 0) " ($skippedProjects skipped)" else ""
         setStatus(
             when {
-                total == 0 && skippedProjects == 0 && updatesChecked -> "All packages are up to date."
-                total == 0 && skippedProjects == 0 -> "No NuGet packages found."
-                total == 0 -> "No packages listed$skipped."
-                !updatesChecked -> "$total package(s) in $projects project(s)$skipped. Press Check for Updates."
-                outdated == 0 && blocked == 0 -> "$total package(s) in $projects project(s) — all up to date$skipped."
-                else -> "$total package(s) in $projects project(s), $outdated outdated$blockedText$skipped."
+                c.packages == 0 && skippedProjects == 0 && updatesChecked -> "All packages are up to date."
+                c.packages == 0 && skippedProjects == 0 -> "No NuGet packages found."
+                c.packages == 0 -> "No packages listed$skipped."
+                !updatesChecked -> "$listed$skipped. Press Check for Updates."
+                c.upgrades == 0 && c.blocked == 0 -> "$listed, all up to date$skipped."
+                else -> "$listed, ${c.upgrades} to upgrade$blockedText$skipped."
             },
         )
     }

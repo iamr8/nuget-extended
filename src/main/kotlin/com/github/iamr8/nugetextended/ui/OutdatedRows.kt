@@ -46,7 +46,27 @@ class PackageSection(
     val deps: List<DepRow>,
 )
 
+/** Status line counts. */
+data class Counts(val packages: Int, val projects: Int, val upgrades: Int, val blocked: Int)
+
 object OutdatedRows {
+    /**
+     * Packages once per id, projects once per project file, upgrades (and blocked ones) once per place
+     * a version is set: a CPM central version or a `$(Name)` property counts once however many
+     * projects use it, a version in a project file once per project.
+     */
+    fun counts(sections: List<PackageSection>): Counts {
+        val rows = sections.flatMap { s -> s.deps.map { s.upgradeTarget to it } }
+        fun site(project: String, d: DepRow) = d.versionFile?.let { "$it:${d.versionLine}" } ?: "$project|${d.name.lowercase()}"
+        fun sites(keep: (DepRow) -> Boolean) = rows.filter { keep(it.second) }.map { (p, d) -> site(p, d) }.distinct().size
+        return Counts(
+            packages = rows.map { it.second.name.lowercase() }.distinct().size,
+            projects = sections.map { it.upgradeTarget }.distinct().size,
+            upgrades = sites { it.outdated },
+            blocked = sites { it.blocked != null },
+        )
+    }
+
     /**
      * Per-project, per-framework sections from an engine scan. Include/exclude: case-insensitive substrings.
      * A row with a newer version only outside its range is up to date: it shows only when [showCapped] or [listAll].

@@ -58,6 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   group of the found row.
 
 ### Fixed
+- The status line counts each package once, not once per project and framework. A version set
+  in one place (CPM `Directory.Packages.props` or a `$(Name)` property) counts as one upgrade.
+  A version in a project file counts once per project.
 - Upper-only ranges like `(,3.0.0]` no longer fail the scan.
 - Cancel during a scan no longer leaves the toolbar disabled.
 - EAP builds are now `0.2.0-eap.*`, so they sort above the released 0.1.4.
