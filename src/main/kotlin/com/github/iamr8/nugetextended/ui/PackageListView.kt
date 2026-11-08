@@ -163,6 +163,14 @@ internal object PackageListLogic {
         return Recommendation(index, entries.filterIsInstance<PackageEntry>().filter(::hit))
     }
 
+    /** [targets] plus every checkable row on the same `$(Name)` property site: one edit moves them all. */
+    fun withShared(targets: List<PackageEntry>, entries: List<ListEntry>): List<PackageEntry> {
+        fun site(e: PackageEntry) = e.dep.versionProperty?.let { e.dep.versionFile to e.dep.versionLine }
+        val sites = targets.mapNotNullTo(HashSet(), ::site)
+        if (sites.isEmpty()) return targets
+        return (targets + outdatedEntries(entries).filter { site(it) in sites }).distinct()
+    }
+
     /** True when at least one row is checkable. */
     fun hasOutdated(entries: List<ListEntry>): Boolean = outdatedEntries(entries).isNotEmpty()
 
@@ -297,11 +305,12 @@ internal class PackageListView(
 
     /** Checks the major rows of [id] and scrolls to its package row. */
     fun recommend(id: String) {
-        val r = PackageListLogic.recommend(entries(), id)
+        val all = entries()
+        val r = PackageListLogic.recommend(all, id)
         if (r.index < 0) return
         list.selectedIndex = r.index
         list.ensureIndexIsVisible(r.index)
-        setChecked(r.rows, true)
+        setChecked(PackageListLogic.withShared(r.rows, all), true)
     }
 
     /** Check all outdated rows if any is unchecked, else uncheck them all. */
@@ -311,10 +320,10 @@ internal class PackageListView(
         setChecked(outdated, PackageListLogic.nextToggleState(outdated))
     }
 
-    /** Check all [targets] if any is unchecked, else uncheck them all. */
+    /** Check all [targets] if any is unchecked, else uncheck them all. Rows on the same `$(Name)` follow. */
     private fun toggle(targets: List<PackageEntry>) {
         if (targets.isEmpty()) return
-        setChecked(targets, PackageListLogic.nextToggleState(targets))
+        setChecked(PackageListLogic.withShared(targets, entries()), PackageListLogic.nextToggleState(targets))
     }
 
     private fun setChecked(targets: List<PackageEntry>, state: Boolean) {
@@ -477,6 +486,7 @@ internal class PackageListView(
                 left.append(entry.childLabel ?: entry.dep.name, nameAttr)
                 left.append("  ·  ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 left.append(entry.dep.current, SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                entry.dep.versionProperty?.let { left.append("  \$($it)", SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES) }
                 // Highlight the speed-search match inside the row text, so the matched characters
                 // stand out as you type — same as Rider's native list search. (`mainTextOnly=false`:
                 // SimpleColoredComponent has no main-text index set here, so this is well-defined.)

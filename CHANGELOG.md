@@ -46,6 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Recommendations.** After an update check, a blue banner lists the packages with a new major
   version (not a pre-release). Click a name to scroll to it and check it. Turn it off in the eye
   menu with **Show Recommendations**. A closed banner comes back with the next scan.
+- **Shared version properties.** A package whose version is `$(Name)` shows the property name next
+  to its version. Checking one of its rows checks every package on that property (and unchecking
+  unchecks them), because one edit moves them all.
 
 ### Fixed
 - Upper-only ranges like `(,3.0.0]` no longer fail the scan.

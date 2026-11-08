@@ -44,6 +44,8 @@ It was called *dotnet outdated GUI* before.
   version, or open the package on nuget.org or its project page.
 - **Recommendations.** After an update check, a banner lists packages with a new major version.
   Click one to jump to it and check it. The eye menu turns it off.
+- **Shared `$(Name)` versions.** The row shows the property name. Packages on one property check
+  together, because one edit moves them all.
 - **A plan before each change.** A dialog shows the files, the packages that share a version, and
   what it skips (and why). One **Undo** reverts every file.
 - **Your NuGet setup.** It uses your `NuGet.config`, package source mapping and credential
