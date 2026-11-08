@@ -2,11 +2,16 @@ package com.github.iamr8.nugetextended.ui
 
 import com.github.iamr8.nugetextended.model.SeverityColor
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DefaultActionGroup
+import com.intellij.openapi.project.DumbAwareAction
 import com.intellij.openapi.ui.popup.Balloon
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.util.text.HtmlChunk
 import com.intellij.ui.JBColor
 import com.intellij.ui.ListSpeedSearch
+import com.intellij.ui.PopupHandler
 import com.intellij.ui.SimpleColoredComponent
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.awt.RelativePoint
@@ -33,6 +38,7 @@ import javax.swing.JPanel
 import javax.swing.KeyStroke
 import javax.swing.ListCellRenderer
 import javax.swing.ListSelectionModel
+import javax.swing.SwingUtilities
 
 /** Maps a severity bucket to a theme-aware color. */
 fun SeverityColor.toJBColor(): Color = when (this) {
@@ -65,6 +71,8 @@ internal data class GroupSummary(val current: String, val newVersion: String, va
 
 /** One checked row, as the engine's planUpgrade needs it. */
 data class CheckedRow(val project: String, val framework: String, val id: String, val target: String, val restoreOnly: Boolean)
+
+internal fun PackageEntry.toCheckedRow() = CheckedRow(target, framework, dep.name, dep.newVersion, dep.restoreOnly)
 
 /** Aggregate checkbox state of a section's outdated rows. */
 internal enum class CheckState { NONE, SOME, ALL }
@@ -148,7 +156,7 @@ internal object PackageListLogic {
     fun checkedRows(entries: List<ListEntry>): List<CheckedRow> =
         entries.filterIsInstance<PackageEntry>()
             .filter { it.checked && it.dep.outdated }
-            .map { CheckedRow(it.target, it.framework, it.dep.name, it.dep.newVersion, it.dep.restoreOnly) }
+            .map { it.toCheckedRow() }
             .distinct()
 
     /** Next checkbox state for a selection: if any is unchecked, check all; else uncheck all. */
@@ -189,7 +197,11 @@ internal object PackageListLogic {
  * checkbox — `Name · Current` on the left, new version (colored by severity) right-aligned.
  * Check multiple outdated packages to drive "Update Selected". Type to speed-search by name.
  */
-class PackageListView(private val onSelectionChanged: () -> Unit) {
+internal class PackageListView(
+    private val onSelectionChanged: () -> Unit,
+    /** Runs a row-menu item (see [RowMenu]). */
+    private val onMenuItem: (MenuItem) -> Unit,
+) {
 
     private val model = DefaultListModel<ListEntry>()
     private val renderer = EntryRenderer()
@@ -203,6 +215,8 @@ class PackageListView(private val onSelectionChanged: () -> Unit) {
         // Toggle a checkbox by clicking it.
         list.addMouseListener(object : MouseAdapter() {
             override fun mousePressed(e: MouseEvent) {
+                // The PopupHandler below owns right clicks.
+                if (e.isPopupTrigger || !SwingUtilities.isLeftMouseButton(e)) return
                 val index = list.locationToIndex(e.point)
                 if (index < 0) return
                 when (val entry = model.getElementAt(index)) {
@@ -222,6 +236,22 @@ class PackageListView(private val onSelectionChanged: () -> Unit) {
             KeyStroke.getKeyStroke("SPACE"),
             JComponent.WHEN_FOCUSED,
         )
+        // Right-click menu: package items on a package row, project items on a project row.
+        list.addMouseListener(object : PopupHandler() {
+            override fun invokePopup(comp: Component, x: Int, y: Int) {
+                val index = list.locationToIndex(Point(x, y))
+                if (index < 0) return
+                val items = RowMenu.itemsFor(model.getElementAt(index), entries())
+                if (items.isEmpty()) return
+                if (!list.isSelectedIndex(index)) list.selectedIndex = index
+                val group = DefaultActionGroup(items.map { item ->
+                    object : DumbAwareAction(item.text) {
+                        override fun actionPerformed(e: AnActionEvent) = onMenuItem(item)
+                    }
+                })
+                ActionManager.getInstance().createActionPopupMenu("NuGetExtended.RowMenu", group).component.show(comp, x, y)
+            }
+        })
         // Rider-style speed search: hidden until you type, then filters/navigates by text.
         ListSpeedSearch.installOn(list) { PackageListLogic.searchText(it) }
     }

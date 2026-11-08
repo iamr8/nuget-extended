@@ -7,7 +7,7 @@ import com.github.iamr8.nugetextended.model.UpgradeSeverity
 import com.github.iamr8.nugetextended.model.severityColor
 
 /** One package row under a project/target-framework section. */
-class DepRow(
+data class DepRow(
     val name: String,
     val current: String,
     /** Newer version if one exists, otherwise empty (until an update check runs). */
@@ -24,6 +24,11 @@ class DepRow(
     val blocked: String? = null,
     /** The version is the CPM central item: in the by-package view the row follows its package row. */
     val central: Boolean = false,
+    /** Where the version is set (1-based line), for the row menu; null when unknown. */
+    val versionFile: String? = null,
+    val versionLine: Int = 0,
+    /** The feed's project URL (untrusted text). */
+    val projectUrl: String? = null,
 )
 
 /** A project + target framework group of packages, e.g. "Sahelanthropus.Data · net10.0". */
@@ -68,16 +73,15 @@ object OutdatedRows {
         val current = row.resolved?.takeIf { it.isNotBlank() } ?: row.requested
         val target = row.target?.takeIf { it.isNotBlank() }
         val capped = row.capped?.takeIf { it.isNotBlank() }
-        return when {
+        val dep = when {
             target != null && row.blocked != null -> DepRow(
                 row.id, current, target, SeverityColor.NONE, outdated = false,
-                requested = row.requested, note = row.blocked, blocked = row.blocked, central = row.central,
+                requested = row.requested, note = row.blocked, blocked = row.blocked,
             )
             target != null -> DepRow(
                 row.id, current, target, severityColor(UpgradeSeverity.from(row.severity), target), outdated = true,
                 requested = row.requested,
                 restoreOnly = row.restoreOnly,
-                central = row.central,
                 note = when {
                     row.restoreOnly -> "Floating version ${row.requested}: restore picks $target."
                     capped != null -> "$capped is newer but outside ${row.requested}."
@@ -88,13 +92,14 @@ object OutdatedRows {
                 row.id, current, if (showCapped) capped else "", SeverityColor.NONE, outdated = false,
                 requested = row.requested,
                 note = "${row.reason ?: "capped by range"}: ${row.requested}",
-                central = row.central,
             )
             else -> DepRow(
                 row.id, current, sourceFailureMarker(row.reason), SeverityColor.NONE, outdated = false,
-                requested = row.requested, note = row.reason, central = row.central,
+                requested = row.requested, note = row.reason,
             )
         }
+        // Facts about where the row lives hold for every kind of row.
+        return dep.copy(central = row.central, versionFile = row.versionFile, versionLine = row.versionLine, projectUrl = row.projectUrl)
     }
 
     /** A short gray marker for a source failure reason; empty when the row has no such reason. */

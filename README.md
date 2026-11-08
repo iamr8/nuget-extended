@@ -40,6 +40,8 @@ It was called *dotnet outdated GUI* before.
 - **Group by Package.** The eye icon switches the list to one row per package, with its projects
   under it. A package from `Directory.Packages.props` is checked once for all projects. Projects on
   another version (a `VersionOverride`, or a different version without CPM) get their own row.
+- **Right-click a row** to upgrade just that package or project, jump to the line that sets the
+  version, or open the package on nuget.org or its project page.
 - **A plan before each change.** A dialog shows the files, the packages that share a version, and
   what it skips (and why). One **Undo** reverts every file.
 - **Your NuGet setup.** It uses your `NuGet.config`, package source mapping and credential

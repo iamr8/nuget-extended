@@ -142,6 +142,17 @@ class OutdatedRowsTest {
         assertFalse(OutdatedRows.toDep(PackageRow("Serilog", "3.0.0", "3.0.0", "4.4.0", "Major")).central)
     }
 
+    // Break: toDep drops where the version is set or the project URL, so the row menu has nothing to open.
+    @Test
+    fun versionLocationAndProjectUrlReachTheRow() {
+        val raw = PackageRow("Serilog", "3.0.0", "3.0.0", null, "None",
+            versionFile = "/r/Directory.Packages.props", versionLine = 3, projectUrl = "https://serilog.net")
+        val dep = OutdatedRows.toDep(raw)
+        assertEquals("/r/Directory.Packages.props", dep.versionFile)
+        assertEquals(3, dep.versionLine)
+        assertEquals("https://serilog.net", dep.projectUrl)
+    }
+
     // Break: fromScan drops a blocked row as if it had no target.
     @Test
     fun blockedRowStaysInTheList() {

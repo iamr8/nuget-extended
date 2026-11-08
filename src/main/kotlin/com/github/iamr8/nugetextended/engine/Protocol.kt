@@ -30,6 +30,11 @@ data class PackageRow(
     val blocked: String? = null,
     /** The version is the CPM central item: an upgrade moves every project that uses it. */
     val central: Boolean = false,
+    /** Where the version is set (1-based line); null for a transitive row. */
+    val versionFile: String? = null,
+    val versionLine: Int = 0,
+    /** The feed's project URL; only for ids with an update. Untrusted text: open only http(s). */
+    val projectUrl: String? = null,
 )
 
 data class FrameworkRows(val framework: String = "", val packages: List<PackageRow> = emptyList())

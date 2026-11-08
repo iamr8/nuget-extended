@@ -51,4 +51,23 @@ public class RowBuilderTests
         Assert.Null(row.Target);
         Assert.Equal("version text '[oops' is not a NuGet version or range", row.Reason);
     }
+
+    // Break: Row picks the project URL of another version than the target, or drops it when only an older version has one.
+    [Fact]
+    public void RowTakesTheTargetsProjectUrlElseTheNewestOne()
+    {
+        var asset = new RowBuilder.Asset("Polly", NuGetVersion.Parse("7.0.0"), true, 0, false);
+        var now = DateTimeOffset.UtcNow;
+        Candidate C(string v, string? url) => new(NuGetVersion.Parse(v), true, now.AddDays(-30), Array.Empty<NuGetFramework>(), url);
+
+        var withTarget = RowBuilder.Row(asset, "[7.0.0,8.0.0)",
+            new[] { C("7.0.0", "https://old"), C("7.2.4", "https://target"), C("8.8.0", "https://newest") },
+            NuGetFramework.Parse("net8.0"), new ScanOptions(), now);
+        Assert.Equal("https://target", withTarget.ProjectUrl);
+
+        var targetHasNone = RowBuilder.Row(asset, "[7.0.0,8.0.0)",
+            new[] { C("7.0.0", "https://old"), C("7.2.4", null), C("8.8.0", "https://newest") },
+            NuGetFramework.Parse("net8.0"), new ScanOptions(), now);
+        Assert.Equal("https://newest", targetHasNone.ProjectUrl);
+    }
 }
