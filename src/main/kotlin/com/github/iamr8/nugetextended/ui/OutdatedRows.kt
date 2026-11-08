@@ -4,6 +4,7 @@ import com.github.iamr8.nugetextended.engine.PackageRow
 import com.github.iamr8.nugetextended.engine.ScanResult
 import com.github.iamr8.nugetextended.model.SeverityColor
 import com.github.iamr8.nugetextended.model.UpgradeSeverity
+import com.github.iamr8.nugetextended.model.isPrerelease
 import com.github.iamr8.nugetextended.model.severityColor
 
 /** One package row under a project/target-framework section. */
@@ -29,6 +30,8 @@ data class DepRow(
     val versionLine: Int = 0,
     /** The feed's project URL (untrusted text). */
     val projectUrl: String? = null,
+    /** A checkable upgrade to a new major version (not a pre-release): listed in the recommendations banner. */
+    val major: Boolean = false,
 )
 
 /** A project + target framework group of packages, e.g. "Sahelanthropus.Data · net10.0". */
@@ -73,15 +76,17 @@ object OutdatedRows {
         val current = row.resolved?.takeIf { it.isNotBlank() } ?: row.requested
         val target = row.target?.takeIf { it.isNotBlank() }
         val capped = row.capped?.takeIf { it.isNotBlank() }
+        val severity = UpgradeSeverity.from(row.severity)
         val dep = when {
             target != null && row.blocked != null -> DepRow(
                 row.id, current, target, SeverityColor.NONE, outdated = false,
                 requested = row.requested, note = row.blocked, blocked = row.blocked,
             )
             target != null -> DepRow(
-                row.id, current, target, severityColor(UpgradeSeverity.from(row.severity), target), outdated = true,
+                row.id, current, target, severityColor(severity, target), outdated = true,
                 requested = row.requested,
                 restoreOnly = row.restoreOnly,
+                major = severity == UpgradeSeverity.MAJOR && !isPrerelease(target),
                 note = when {
                     row.restoreOnly -> "Floating version ${row.requested}: restore picks $target."
                     capped != null -> "$capped is newer but outside ${row.requested}."

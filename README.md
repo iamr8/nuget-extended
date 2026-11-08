@@ -42,6 +42,8 @@ It was called *dotnet outdated GUI* before.
   another version (a `VersionOverride`, or a different version without CPM) get their own row.
 - **Right-click a row** to upgrade just that package or project, jump to the line that sets the
   version, or open the package on nuget.org or its project page.
+- **Recommendations.** After an update check, a banner lists packages with a new major version.
+  Click one to jump to it and check it. The eye menu turns it off.
 - **A plan before each change.** A dialog shows the files, the packages that share a version, and
   what it skips (and why). One **Undo** reverts every file.
 - **Your NuGet setup.** It uses your `NuGet.config`, package source mapping and credential

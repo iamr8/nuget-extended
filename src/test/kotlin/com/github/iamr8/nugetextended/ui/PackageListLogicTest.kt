@@ -9,7 +9,7 @@ import org.junit.Test
 
 class PackageListLogicTest {
 
-    private fun dep(name: String, outdated: Boolean = true, current: String = "1.0.0", newV: String = "2.0.0", central: Boolean = false) =
+    private fun dep(name: String, outdated: Boolean = true, current: String = "1.0.0", newV: String = "2.0.0", central: Boolean = false, major: Boolean = false) =
         DepRow(
             name = name,
             current = current,
@@ -17,6 +17,7 @@ class PackageListLogicTest {
             color = if (outdated) SeverityColor.RED else SeverityColor.NONE,
             outdated = outdated,
             central = central,
+            major = major,
         )
 
     private fun section(project: String, framework: String, target: String, deps: List<DepRow>) =
@@ -360,5 +361,43 @@ class PackageListLogicTest {
             ),
             PackageListLogic.checkedRows(entries).sortedBy { it.framework },
         )
+    }
+
+    // Break: majorIds lists a package twice, lists a non-major one, or loses list order.
+    @Test
+    fun majorIdsListEachMajorPackageOnceInListOrder() {
+        val entries = PackageListLogic.buildEntries(listOf(
+            section("A", "net8.0", "/a.csproj", listOf(dep("Zed", major = true), dep("Minor"), dep("Alpha", major = true))),
+            section("B", "net8.0", "/b.csproj", listOf(dep("Zed", major = true))),
+        ))
+        assertEquals(listOf("Alpha", "Zed"), PackageListLogic.majorIds(entries))
+    }
+
+    // Break: recommend checks a non-major row of the package, or scrolls to a child or header instead of the package row.
+    @Test
+    fun recommendChecksTheMajorRowsAndPointsAtTheFirstPackageRow() {
+        val sections = listOf(
+            section("A", "net8.0", "/a.csproj", listOf(dep("Other"), dep("Polly", major = true))),
+            section("B", "net8.0", "/b.csproj", listOf(dep("Polly", current = "7.0.0", newV = "7.2.0"))),
+        )
+
+        val byProject = PackageListLogic.buildEntries(sections)
+        val p = PackageListLogic.recommend(byProject, "polly")
+        assertEquals(2, p.index) // header A, Other, Polly
+        assertEquals(listOf("/a.csproj"), p.rows.map { it.target })
+
+        val byPackage = PackageListLogic.buildByPackage(sections)
+        val g = PackageListLogic.recommend(byPackage, "Polly")
+        assertTrue(byPackage[g.index] is PackageGroupEntry)
+        assertTrue(g.rows.single() in (byPackage[g.index] as PackageGroupEntry).packages)
+        assertEquals(listOf("/a.csproj"), g.rows.map { it.target })
+    }
+
+    // Break: the banner text gets the plural wrong, or counts the hidden packages wrong.
+    @Test
+    fun recommendationTextCountsAndNamesTheHiddenOnes() {
+        assertEquals("1 package has a new major version. Click one to check it.", PackageListLogic.recommendationText(1, 1))
+        assertEquals("3 packages have a new major version. Click one to check it.", PackageListLogic.recommendationText(3, 3))
+        assertEquals("12 packages have a new major version. Click one to check it. +2 more in the list.", PackageListLogic.recommendationText(12, 10))
     }
 }
