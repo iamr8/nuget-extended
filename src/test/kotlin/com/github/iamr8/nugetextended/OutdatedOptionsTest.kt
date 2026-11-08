@@ -37,6 +37,7 @@ class OutdatedOptionsTest {
         showRecommendations = false,
         showFramework = true,
         showVariable = true,
+        collapseGroups = false,
     )
 
     @Test

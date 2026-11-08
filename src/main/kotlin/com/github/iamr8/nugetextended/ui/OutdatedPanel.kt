@@ -280,7 +280,7 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
     /** Render the list from [allRows] and update the status line. EDT only. */
     private fun render() {
         listView.display = display()
-        listView.setData(allRows, optionsService.options.groupByPackage)
+        listView.setData(allRows, optionsService.options.groupByPackage, optionsService.options.collapseGroups)
         val total = allRows.sumOf { it.deps.size }
         val projects = allRows.map { it.projectName }.distinct().size
         val outdated = allRows.sumOf { s -> s.deps.count { it.outdated } }
@@ -728,6 +728,17 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
             add(ShowRecommendationsAction())
             add(DisplayAction("Show Target Framework", { it.showFramework }) { o, v -> o.showFramework = v })
             add(DisplayAction("Show Version Variable", { it.showVariable }) { o, v -> o.showVariable = v })
+            add(CollapseGroupsAction())
+        }
+    }
+
+    /** Also applies at once: every group closes or opens; checks stay. */
+    private inner class CollapseGroupsAction : ToggleAction("Collapse Groups by Default") {
+        override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        override fun isSelected(e: AnActionEvent) = optionsService.options.collapseGroups
+        override fun setSelected(e: AnActionEvent, state: Boolean) {
+            optionsService.options.collapseGroups = state
+            listView.setAllCollapsed(state)
         }
     }
 

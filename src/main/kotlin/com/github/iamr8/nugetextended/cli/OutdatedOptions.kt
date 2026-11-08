@@ -61,6 +61,8 @@ data class OutdatedOptions(
     var showFramework: Boolean = false,
     /** Show the `$(Name)` a version comes from. */
     var showVariable: Boolean = false,
+    /** Groups (project headers, package rows) start collapsed after each scan. */
+    var collapseGroups: Boolean = true,
 ) {
     /** Copies every field from [other] in place (keeps this instance's identity for UI bindings). */
     fun assignFrom(other: OutdatedOptions) {
@@ -87,6 +89,7 @@ data class OutdatedOptions(
         showRecommendations = other.showRecommendations
         showFramework = other.showFramework
         showVariable = other.showVariable
+        collapseGroups = other.collapseGroups
     }
 
     /** Independent deep copy (lists not shared). */
