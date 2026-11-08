@@ -5,7 +5,9 @@ import com.github.iamr8.nugetextended.engine.PackageRow
 import com.github.iamr8.nugetextended.engine.ProjectRows
 import com.github.iamr8.nugetextended.engine.ScanResult
 import com.github.iamr8.nugetextended.model.SeverityColor
+import com.github.iamr8.nugetextended.ui.DepRow
 import com.github.iamr8.nugetextended.ui.OutdatedRows
+import com.github.iamr8.nugetextended.ui.PackageSection
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -181,5 +183,40 @@ class OutdatedRowsTest {
         val literal = OutdatedRows.toDep(PackageRow("Polly", "7.0.0", "7.0.0", "7.2.4", "Minor", versionFile = "/r/A.csproj", versionLine = 5))
         assertNull(literal.versionProperty)
         assertNull(literal.note)
+    }
+
+    // Break: counts adds a row per project and framework, so a shared version (CPM or $(Name)) or a
+    // multi-target project is counted more than once.
+    @Test
+    fun countsPackagesOncePerIdAndUpgradesOncePerVersionSite() {
+        fun d(id: String, file: String?, line: Int = 0, outdated: Boolean = true) = DepRow(
+            id, "1.0.0", if (outdated) "2.0.0" else "", SeverityColor.RED, outdated, versionFile = file, versionLine = line,
+        )
+        val sections = listOf(
+            // Sentry: CPM central version, two projects -> one upgrade.
+            PackageSection("A", "net8.0", "/a.csproj", listOf(
+                d("Sentry", "/Directory.Packages.props", 4),
+                d("MassTransit", "/Directory.Build.props", 3),
+                d("MassTransit.Analyzers", "/Directory.Build.props", 3), // same $(Name) line -> same upgrade
+                d("Dapper", "/a.csproj", 9),
+                d("Transitive.Lib", null),
+            )),
+            PackageSection("B", "net6.0", "/b.csproj", listOf(
+                d("Sentry", "/Directory.Packages.props", 4),
+                d("Dapper", "/b.csproj", 7), // its own csproj line -> its own upgrade
+                d("Transitive.Lib", null),
+                d("Polly", "/b.csproj", 8, outdated = false),
+            )),
+            PackageSection("B", "net8.0", "/b.csproj", listOf(
+                d("Dapper", "/b.csproj", 7), // same line, other framework -> same upgrade
+            )),
+        )
+
+        val c = OutdatedRows.counts(sections)
+
+        assertEquals(6, c.packages) // Sentry, MassTransit, MassTransit.Analyzers, Dapper, Transitive.Lib, Polly
+        assertEquals(2, c.projects)
+        // Sentry (central), $(Name) line, Dapper in A, Dapper in B (both frameworks), Transitive.Lib in A, in B.
+        assertEquals(6, c.upgrades)
     }
 }
