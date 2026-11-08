@@ -93,6 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   do not have, so the tool window could not find its engine there.
 - A project choice made in **Scope** while a scan runs is no longer lost. The list loads again
   with the new scope when the scan ends.
+- A request sent right after the previous answer no longer fails now and then with "Another
+  request is running."
 
 ## [0.1.4] - 2026-08-29
 
