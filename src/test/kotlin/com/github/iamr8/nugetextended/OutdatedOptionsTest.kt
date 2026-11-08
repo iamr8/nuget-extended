@@ -35,6 +35,8 @@ class OutdatedOptionsTest {
         credLogLevel = CredLogLevel.Error,
         groupByPackage = true,
         showRecommendations = false,
+        showFramework = true,
+        showVariable = true,
     )
 
     @Test

@@ -57,6 +57,10 @@ data class OutdatedOptions(
     var groupByPackage: Boolean = false,
     /** After an update check, a banner lists the packages with a new major version. */
     var showRecommendations: Boolean = true,
+    /** Show each project's target framework (a project with several always shows them). */
+    var showFramework: Boolean = false,
+    /** Show the `$(Name)` a version comes from. */
+    var showVariable: Boolean = false,
 ) {
     /** Copies every field from [other] in place (keeps this instance's identity for UI bindings). */
     fun assignFrom(other: OutdatedOptions) {
@@ -81,6 +85,8 @@ data class OutdatedOptions(
         credLogLevel = other.credLogLevel
         groupByPackage = other.groupByPackage
         showRecommendations = other.showRecommendations
+        showFramework = other.showFramework
+        showVariable = other.showVariable
     }
 
     /** Independent deep copy (lists not shared). */

@@ -49,6 +49,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Shared version properties.** A package whose version is `$(Name)` shows the property name next
   to its version. Checking one of its rows checks every package on that property (and unchecking
   unchecks them), because one edit moves them all.
+- **Eye menu: Show Target Framework and Show Version Variable** (both off by default). A project
+  with several target frameworks always shows them. In Group by Package, a project row shows a
+  version or `$(Name)` only when it differs from its package row.
 
 ### Fixed
 - Upper-only ranges like `(,3.0.0]` no longer fail the scan.
@@ -95,6 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the new scope when the scan ends.
 - A request sent right after the previous answer no longer fails now and then with "Another
   request is running."
+- In a narrow window, long names no longer run under the new version: the text is cut before it.
+- Project rows that follow a CPM package row are gray, because only the package row can be checked.
 
 ## [0.1.4] - 2026-08-29
 
