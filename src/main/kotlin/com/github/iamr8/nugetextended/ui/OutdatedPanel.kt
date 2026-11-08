@@ -279,6 +279,7 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
 
     /** Render the list from [allRows] and update the status line. EDT only. */
     private fun render() {
+        listView.display = display()
         listView.setData(allRows, optionsService.options.groupByPackage)
         val total = allRows.sumOf { it.deps.size }
         val projects = allRows.map { it.projectName }.distinct().size
@@ -725,6 +726,24 @@ class OutdatedPanel(private val project: Project) : JPanel(BorderLayout()) {
             add(ViewModeAction(byPackage = true, "Group by Package"))
             addSeparator()
             add(ShowRecommendationsAction())
+            add(DisplayAction("Show Target Framework", { it.showFramework }) { o, v -> o.showFramework = v })
+            add(DisplayAction("Show Version Variable", { it.showVariable }) { o, v -> o.showVariable = v })
+        }
+    }
+
+    private fun display() = optionsService.options.let { ListDisplay(it.showFramework, it.showVariable) }
+
+    /** An eye-menu option that only changes what the rows show: a repaint, checks stay. */
+    private inner class DisplayAction(
+        text: String,
+        private val get: (OutdatedOptions) -> Boolean,
+        private val set: (OutdatedOptions, Boolean) -> Unit,
+    ) : ToggleAction(text) {
+        override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        override fun isSelected(e: AnActionEvent) = get(optionsService.options)
+        override fun setSelected(e: AnActionEvent, state: Boolean) {
+            set(optionsService.options, state)
+            listView.display = display()
         }
     }
 

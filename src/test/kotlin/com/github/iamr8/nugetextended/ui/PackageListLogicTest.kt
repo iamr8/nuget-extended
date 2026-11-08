@@ -429,4 +429,56 @@ class PackageListLogicTest {
         val polly = rows.first { it.dep.name == "Polly" }
         assertEquals(listOf(polly), PackageListLogic.withShared(listOf(polly), entries))
     }
+
+    // Break: a project with one target framework still shows it when the option is off, or a
+    // multi-target project hides it (its two rows would then look the same).
+    @Test
+    fun frameworkShowsWhenAskedOrWhenTheProjectHasSeveral() {
+        val entries = PackageListLogic.buildEntries(listOf(
+            section("Single", "net8.0", "/s.csproj", listOf(dep("A"))),
+            section("Multi", "net6.0", "/m.csproj", listOf(dep("A"))),
+            section("Multi", "net8.0", "/m.csproj", listOf(dep("A"))),
+        ))
+        val headers = entries.filterIsInstance<HeaderEntry>()
+        assertEquals(listOf("Multi  ·  net6.0", "Multi  ·  net8.0", "Single"), headers.map { it.label.text(showFramework = false) })
+        assertEquals(listOf("Multi  ·  net6.0", "Multi  ·  net8.0", "Single  ·  net8.0"), headers.map { it.label.text(showFramework = true) })
+
+        val children = PackageListLogic.buildByPackage(listOf(
+            section("Single", "net8.0", "/s.csproj", listOf(dep("A"))),
+            section("Multi", "net6.0", "/m.csproj", listOf(dep("A"))),
+            section("Multi", "net8.0", "/m.csproj", listOf(dep("A"))),
+        )).filterIsInstance<PackageEntry>()
+        assertEquals(listOf("Multi  ·  net6.0", "Multi  ·  net8.0", "Single"), children.map { it.child!!.text(showFramework = false) })
+    }
+
+    // Break: a project row under a package repeats the version or $(Name) the package row already
+    // shows, or hides one that differs (another target on an older framework, another variable).
+    @Test
+    fun childRowShowsOnlyWhatDiffersFromItsPackageRow() {
+        fun prop(newV: String, property: String?) =
+            dep("Lib", current = "1.0.0", newV = newV, property = property, file = "/r/D.props", line = 3)
+        val group = PackageListLogic.buildByPackage(listOf(
+            section("A", "net8.0", "/a.csproj", listOf(prop("2.0.0", "LibVersion"))),
+            section("B", "net8.0", "/b.csproj", listOf(prop("2.0.0", "LibVersion"))),
+            section("C", "net6.0", "/c.csproj", listOf(prop("1.5.0", "OtherVersion"))),
+        )).filterIsInstance<PackageGroupEntry>().single()
+        val summary = PackageListLogic.groupSummary(group)
+        assertEquals("1.0.0", summary.current)
+        assertEquals("various", summary.newVersion)
+        assertEquals(null, summary.variable)
+        val a = group.packages.first { it.target == "/a.csproj" }
+        val c = group.packages.first { it.target == "/c.csproj" }
+
+        assertEquals(ChildParts(current = null, variable = "LibVersion", newVersion = "2.0.0"), PackageListLogic.childParts(a, summary, showVariable = true))
+        assertEquals(ChildParts(current = null, variable = null, newVersion = "2.0.0"), PackageListLogic.childParts(a, summary, showVariable = false))
+        assertEquals(ChildParts(current = null, variable = "OtherVersion", newVersion = "1.5.0"), PackageListLogic.childParts(c, summary, showVariable = true))
+
+        val same = PackageListLogic.buildByPackage(listOf(
+            section("A", "net8.0", "/a.csproj", listOf(prop("2.0.0", "LibVersion"))),
+            section("B", "net8.0", "/b.csproj", listOf(prop("2.0.0", "LibVersion"))),
+        )).filterIsInstance<PackageGroupEntry>().single()
+        val sameSummary = PackageListLogic.groupSummary(same)
+        assertEquals("LibVersion", sameSummary.variable)
+        assertEquals(ChildParts(null, null, null), PackageListLogic.childParts(same.packages.first(), sameSummary, showVariable = true))
+    }
 }

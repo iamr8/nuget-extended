@@ -47,6 +47,8 @@ class OutdatedOptionsPersistenceTest {
             credLogLevel = CredLogLevel.Error,
             groupByPackage = true,
             showRecommendations = false,
+            showFramework = true,
+            showVariable = true,
         )
         assertEquals(o, roundTrip(o))
     }

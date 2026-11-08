@@ -52,22 +52,43 @@ internal sealed class ListEntry
 /** A row with a three-state checkbox over its own package rows. */
 internal sealed class GroupEntry(val packages: List<PackageEntry>) : ListEntry()
 /** A `Project · framework` section header carrying its own package rows for the section toggle. */
-internal class HeaderEntry(val title: String, packages: List<PackageEntry>) : GroupEntry(packages)
+internal class HeaderEntry(val label: ProjectLabel, packages: List<PackageEntry>) : GroupEntry(packages) {
+    /** The full title (with the framework): what speed search matches. */
+    val title: String get() = label.full
+}
+
+/** A project + target framework. A project with several target frameworks always shows them, so its rows differ. */
+internal data class ProjectLabel(val name: String, val framework: String, val multiTarget: Boolean) {
+    val full = "$name  ·  $framework"
+    fun text(showFramework: Boolean) = if (showFramework || multiTarget) full else name
+}
 /**
  * By-package view: one package version with a `Project · framework` child row per place that uses it.
  * When a package has a CPM central row and other rows, [tag] is `central` or `override`.
  */
-internal class PackageGroupEntry(val id: String, packages: List<PackageEntry>, val tag: String? = null) : GroupEntry(packages)
-/** A package row. With [childLabel] (`Project · framework`) it is a child of a [PackageGroupEntry]. */
-internal class PackageEntry(val dep: DepRow, val target: String, val framework: String = "", val childLabel: String? = null) : ListEntry() {
+internal class PackageGroupEntry(val id: String, packages: List<PackageEntry>, val tag: String? = null) : GroupEntry(packages) {
+    init { packages.forEach { it.parent = this } }
+    /** Rows never change after build, so the summary is computed once, not per paint. */
+    val summary: GroupSummary by lazy { PackageListLogic.groupSummary(this) }
+}
+/** A package row. With [child] (its project) it is a child of a [PackageGroupEntry]. */
+internal class PackageEntry(val dep: DepRow, val target: String, val framework: String = "", val child: ProjectLabel? = null) : ListEntry() {
     var checked: Boolean = false
+    /** The package row this project row sits under (by-package view). */
+    var parent: PackageGroupEntry? = null
 
     /** A CPM central child: its version is shared, so only its package row toggles it. */
-    val followsGroup: Boolean get() = childLabel != null && dep.central
+    val followsGroup: Boolean get() = child != null && dep.central
 }
 
 /** What a package row shows: one value when all children agree, else `various`. */
-internal data class GroupSummary(val current: String, val newVersion: String, val color: SeverityColor)
+internal data class GroupSummary(val current: String, val newVersion: String, val color: SeverityColor, val variable: String? = null)
+
+/** What the eye menu shows on top of names and versions. */
+internal data class ListDisplay(val showFramework: Boolean = false, val showVariable: Boolean = false)
+
+/** What a project row under a package row adds: only the values that differ from the package row (null = hidden). */
+internal data class ChildParts(val current: String?, val variable: String?, val newVersion: String?)
 
 /** One checked row, as the engine's planUpgrade needs it. */
 data class CheckedRow(val project: String, val framework: String, val id: String, val target: String, val restoreOnly: Boolean)
@@ -87,11 +108,12 @@ internal object PackageListLogic {
     /** Section headers + package rows in display order: sections sorted, deps outdated-first by name. */
     fun buildEntries(sections: List<PackageSection>): List<ListEntry> {
         val entries = ArrayList<ListEntry>()
+        val multi = multiTargets(sections)
         for (section in sorted(sections)) {
             val packages = section.deps
                 .sortedWith(compareByDescending<DepRow> { it.outdated }.thenBy { it.name.lowercase() })
                 .map { PackageEntry(it, section.upgradeTarget, section.framework) }
-            entries.add(HeaderEntry(title(section), packages))
+            entries.add(HeaderEntry(label(section, multi), packages))
             entries.addAll(packages)
         }
         return entries
@@ -103,9 +125,10 @@ internal object PackageListLogic {
      * row per current version (VersionOverride, or projects on different versions without CPM). So a
      * click on a package row never moves a project that holds another version.
      */
-    fun buildByPackage(sections: List<PackageSection>): List<ListEntry> =
-        sorted(sections)
-            .flatMap { s -> s.deps.map { PackageEntry(it, s.upgradeTarget, s.framework, title(s)) } }
+    fun buildByPackage(sections: List<PackageSection>): List<ListEntry> {
+        val multi = multiTargets(sections)
+        return sorted(sections)
+            .flatMap { s -> s.deps.map { PackageEntry(it, s.upgradeTarget, s.framework, label(s, multi)) } }
             .groupBy { it.dep.name.lowercase() }
             .values
             .sortedWith(compareByDescending<List<PackageEntry>> { c -> c.any { it.dep.outdated } }.thenBy { it.first().dep.name.lowercase() })
@@ -118,10 +141,17 @@ internal object PackageListLogic {
                 }
             }
             .flatMap { listOf(it) + it.packages }
+    }
+
+    /** Project files that appear with more than one target framework. */
+    private fun multiTargets(sections: List<PackageSection>): Set<String> =
+        sections.groupBy { it.upgradeTarget }.filterValues { s -> s.map { it.framework }.distinct().size > 1 }.keys
+
+    private fun label(section: PackageSection, multi: Set<String>) =
+        ProjectLabel(section.projectName, section.framework, section.upgradeTarget in multi)
 
     private fun sorted(sections: List<PackageSection>) = sections.sortedWith(compareBy({ it.projectName.lowercase() }, { it.framework }))
 
-    private fun title(section: PackageSection) = "${section.projectName}  ·  ${section.framework}"
 
     /** Package rows a click or Space on [entry] toggles: none for a central child. */
     fun toggleTargets(entry: ListEntry?): List<PackageEntry> = when (entry) {
@@ -135,8 +165,16 @@ internal object PackageListLogic {
         val checkable = group.packages.filter { it.dep.outdated }
         val target = if (checkable.isEmpty()) "" else one(checkable.map { it.dep.newVersion })
         val color = if (target.isEmpty() || target == "various") SeverityColor.NONE else checkable.first().dep.color
-        return GroupSummary(one(group.packages.map { it.dep.current }), target, color)
+        val variable = group.packages.map { it.dep.versionProperty }.distinct().singleOrNull()
+        return GroupSummary(one(group.packages.map { it.dep.current }), target, color, variable)
     }
+
+    /** What a row shows. A project row under a package row ([summary]) shows only values that differ from it. */
+    fun childParts(child: PackageEntry, summary: GroupSummary?, showVariable: Boolean): ChildParts = ChildParts(
+        current = child.dep.current.takeIf { it != summary?.current },
+        variable = child.dep.versionProperty?.takeIf { showVariable && (summary == null || it != summary.variable) },
+        newVersion = child.dep.newVersion.takeIf { it.isNotEmpty() && it != summary?.newVersion },
+    )
 
     fun hasChecked(entries: List<ListEntry>): Boolean =
         entries.any { it is PackageEntry && it.checked && it.dep.outdated }
@@ -212,7 +250,7 @@ internal object PackageListLogic {
      * renderer highlights.
      */
     fun searchText(entry: ListEntry?): String = when (entry) {
-        is PackageEntry -> entry.childLabel ?: entry.dep.name
+        is PackageEntry -> entry.child?.full ?: entry.dep.name
         is HeaderEntry -> entry.title
         is PackageGroupEntry -> entry.id
         null -> ""
@@ -232,7 +270,12 @@ internal class PackageListView(
 ) {
 
     private val model = DefaultListModel<ListEntry>()
-    private val renderer = EntryRenderer()
+
+    /** What the rows show besides names and versions; a change only repaints (checks stay). */
+    var display = ListDisplay()
+        set(value) { field = value; list.repaint() }
+
+    private val renderer = EntryRenderer { display }
     private val list = JBList(model).apply {
         selectionMode = ListSelectionModel.MULTIPLE_INTERVAL_SELECTION
         cellRenderer = renderer
@@ -334,7 +377,7 @@ internal class PackageListView(
 
     /** Right edge of the checkbox click area: a child row's checkbox is indented. */
     private fun checkboxEnd(entry: PackageEntry): Int =
-        CHECKBOX_HIT_WIDTH + if (entry.childLabel != null) JBUI.scale(CHILD_INDENT) else 0
+        CHECKBOX_HIT_WIDTH + if (entry.child != null) JBUI.scale(CHILD_INDENT) else 0
 
     /** Checked outdated rows for the upgrade. */
     fun checkedRows(): List<CheckedRow> = PackageListLogic.checkedRows(entries())
@@ -361,7 +404,7 @@ internal class PackageListView(
         headers.forEach { list.selectionModel.removeSelectionInterval(it, it) }
     }
 
-    private class EntryRenderer : ListCellRenderer<ListEntry> {
+    private class EntryRenderer(private val display: () -> ListDisplay) : ListCellRenderer<ListEntry> {
         private val headerPanel = JPanel(BorderLayout()).apply { border = JBUI.Borders.empty(6, 8, 2, 8) }
         private val header = SimpleColoredComponent().apply { isOpaque = false }
         private val headerCheck = ThreeStateCheckBox().apply {
@@ -382,34 +425,29 @@ internal class PackageListView(
         }
         private val groupLeft = SimpleColoredComponent().apply { isOpaque = false }
         private val groupRight = SimpleColoredComponent().apply { isOpaque = false }
-        private val groupWest = JPanel().apply {
-            isOpaque = false
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
-        }
+        private val groupWest = JPanel(BorderLayout()).apply { isOpaque = false }
 
         private val rowPanel = JPanel(BorderLayout()).apply { border = rowBorder }
         private val checkBox = JCheckBox().apply { isOpaque = false; border = JBUI.Borders.emptyRight(6) }
-        private val westPanel = JPanel().apply {
-            isOpaque = false
-            layout = BoxLayout(this, BoxLayout.X_AXIS)
-        }
+        private val westPanel = JPanel(BorderLayout()).apply { isOpaque = false }
         private val left = SimpleColoredComponent().apply { isOpaque = false }
         private val right = SimpleColoredComponent().apply { isOpaque = false }
         /** Shown on a blocked row; a click on it opens the reason (see [hitsInfo]). */
         private val info = JLabel(AllIcons.General.Information).apply { border = JBUI.Borders.emptyLeft(6) }
 
         init {
-            westPanel.add(checkBox)
-            westPanel.add(left)
-            westPanel.add(info)
+            // The text takes the width left of the version column and is cut there: no overlap.
+            westPanel.add(checkBox, BorderLayout.WEST)
+            westPanel.add(left, BorderLayout.CENTER)
+            westPanel.add(info, BorderLayout.EAST)
             headerWest.add(headerCheck)
             headerWest.add(header)
             headerPanel.add(headerWest, BorderLayout.WEST)
-            groupWest.add(groupCheck)
-            groupWest.add(groupLeft)
-            groupPanel.add(groupWest, BorderLayout.WEST)
+            groupWest.add(groupCheck, BorderLayout.WEST)
+            groupWest.add(groupLeft, BorderLayout.CENTER)
+            groupPanel.add(groupWest, BorderLayout.CENTER)
             groupPanel.add(groupRight, BorderLayout.EAST)
-            rowPanel.add(westPanel, BorderLayout.WEST)
+            rowPanel.add(westPanel, BorderLayout.CENTER)
             rowPanel.add(right, BorderLayout.EAST)
         }
 
@@ -429,7 +467,7 @@ internal class PackageListView(
                 headerCheck.isEnabled = PackageListLogic.sectionHasOutdated(entry)
                 headerCheck.state = checkState(entry)
                 header.clear()
-                header.append(entry.title, SimpleTextAttributes.GRAYED_BOLD_ATTRIBUTES)
+                header.append(entry.label.text(display().showFramework), SimpleTextAttributes.GRAYED_BOLD_ATTRIBUTES)
                 // Highlight the speed-search match inside the header title, like Rider's own lists.
                 SpeedSearchUtil.applySpeedSearchHighlighting(list, header, false, false)
                 headerPanel
@@ -442,7 +480,7 @@ internal class PackageListView(
                 groupCheck.background = bg
                 groupCheck.isEnabled = PackageListLogic.sectionHasOutdated(entry)
                 groupCheck.state = checkState(entry)
-                val summary = PackageListLogic.groupSummary(entry)
+                val summary = entry.summary
                 groupLeft.clear()
                 groupRight.clear()
                 val nameAttr = if (selected) SimpleTextAttributes(SimpleTextAttributes.STYLE_BOLD, list.selectionForeground)
@@ -451,6 +489,7 @@ internal class PackageListView(
                 entry.tag?.let { groupLeft.append(" ($it)", SimpleTextAttributes.GRAYED_ATTRIBUTES) }
                 groupLeft.append("  ·  ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 groupLeft.append(summary.current, SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                summary.variable?.takeIf { display().showVariable }?.let { groupLeft.append("  \$($it)", SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES) }
                 SpeedSearchUtil.applySpeedSearchHighlighting(list, groupLeft, false, selected)
                 if (summary.newVersion.isNotEmpty()) {
                     val attr = when {
@@ -466,7 +505,8 @@ internal class PackageListView(
                 val bg = if (selected) list.selectionBackground else list.background
                 rowPanel.isOpaque = true
                 rowPanel.background = bg
-                rowPanel.border = if (entry.childLabel != null) childBorder else rowBorder
+                val child = entry.child
+                rowPanel.border = if (child != null) childBorder else rowBorder
                 rowPanel.toolTipText = if (entry.followsGroup && entry.dep.outdated) CENTRAL_NOTE else entry.dep.note
                 checkBox.background = bg
                 // Only outdated packages are checkable; a central child follows its package row.
@@ -476,31 +516,35 @@ internal class PackageListView(
                 left.clear()
                 right.clear()
                 info.isVisible = entry.dep.blocked != null
-                val nameAttr = if (entry.dep.blocked != null) {
-                    SimpleTextAttributes.ERROR_ATTRIBUTES
-                } else if (selected) {
-                    SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, list.selectionForeground)
-                } else {
-                    SimpleTextAttributes.REGULAR_ATTRIBUTES
+                val nameAttr = when {
+                    entry.dep.blocked != null -> SimpleTextAttributes.ERROR_ATTRIBUTES
+                    entry.followsGroup -> SimpleTextAttributes.GRAYED_ATTRIBUTES // not checkable: its package row decides
+                    selected -> SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, list.selectionForeground)
+                    else -> SimpleTextAttributes.REGULAR_ATTRIBUTES
                 }
-                left.append(entry.childLabel ?: entry.dep.name, nameAttr)
-                left.append("  ·  ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
-                left.append(entry.dep.current, SimpleTextAttributes.GRAYED_ATTRIBUTES)
-                entry.dep.versionProperty?.let { left.append("  \$($it)", SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES) }
+                val show = display()
+                val parts = PackageListLogic.childParts(entry, entry.parent?.summary, show.showVariable)
+                left.append(child?.text(show.showFramework) ?: entry.dep.name, nameAttr)
+                parts.current?.let {
+                    left.append("  ·  ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                    left.append(it, SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                }
+                parts.variable?.let { left.append("  \$($it)", SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES) }
                 // Highlight the speed-search match inside the row text, so the matched characters
                 // stand out as you type — same as Rider's native list search. (`mainTextOnly=false`:
                 // SimpleColoredComponent has no main-text index set here, so this is well-defined.)
                 SpeedSearchUtil.applySpeedSearchHighlighting(list, left, false, selected)
 
-                if (entry.dep.newVersion.isNotEmpty()) {
+                parts.newVersion?.let { newVersion ->
                     val attr = when {
+                        entry.followsGroup -> SimpleTextAttributes.GRAYED_ATTRIBUTES
                         entry.dep.outdated && entry.dep.color != SeverityColor.NONE ->
                             SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, entry.dep.color.toJBColor())
                         !entry.dep.outdated -> SimpleTextAttributes.GRAYED_ATTRIBUTES // newer, but outside the range
                         selected -> SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, list.selectionForeground)
                         else -> SimpleTextAttributes.REGULAR_ATTRIBUTES
                     }
-                    right.append(entry.dep.newVersion, attr)
+                    right.append(newVersion, attr)
                 }
                 rowPanel
             }

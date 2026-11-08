@@ -20,7 +20,7 @@ internal object RowMenu {
     fun itemsFor(entry: ListEntry, all: List<ListEntry>): List<MenuItem> = when (entry) {
         is HeaderEntry -> entry.packages.firstOrNull()?.let { projectItems(it.target, all) }.orEmpty()
         is PackageGroupEntry -> packageItems(entry.id, entry.packages)
-        is PackageEntry -> if (entry.childLabel != null) projectItems(entry.target, all) else packageItems(entry.dep.name, listOf(entry))
+        is PackageEntry -> if (entry.child != null) projectItems(entry.target, all) else packageItems(entry.dep.name, listOf(entry))
     }
 
     private fun packageItems(id: String, rows: List<PackageEntry>): List<MenuItem> = buildList {
