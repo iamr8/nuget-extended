@@ -27,7 +27,8 @@ public sealed record PackageRow(string Id, string Requested, string? Resolved, s
     string? Blocked = null, // Target exists but another id on the same version site lacks it (SharedVersions)
     bool Central = false, // The version is the CPM central item: an upgrade moves every project that uses it
     string? VersionFile = null, int VersionLine = 0, // Where the version is set (1-based line); null for a transitive row
-    string? ProjectUrl = null); // The feed's project URL for the target (or newest) version; only for ids with an update
+    string? ProjectUrl = null, // The feed's project URL for the target (or newest) version; only for ids with an update
+    string? VersionProperty = null); // The property name when the version is `$(Name)`; every package that uses it moves together
 
 public sealed record FrameworkRows(string Framework, IReadOnlyList<PackageRow> Packages);
 

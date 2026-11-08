@@ -9,7 +9,8 @@ import org.junit.Test
 
 class PackageListLogicTest {
 
-    private fun dep(name: String, outdated: Boolean = true, current: String = "1.0.0", newV: String = "2.0.0", central: Boolean = false, major: Boolean = false) =
+    private fun dep(name: String, outdated: Boolean = true, current: String = "1.0.0", newV: String = "2.0.0", central: Boolean = false, major: Boolean = false,
+                    property: String? = null, file: String? = null, line: Int = 0) =
         DepRow(
             name = name,
             current = current,
@@ -18,6 +19,9 @@ class PackageListLogicTest {
             outdated = outdated,
             central = central,
             major = major,
+            versionProperty = property,
+            versionFile = file,
+            versionLine = line,
         )
 
     private fun section(project: String, framework: String, target: String, deps: List<DepRow>) =
@@ -399,5 +403,30 @@ class PackageListLogicTest {
         assertEquals("1 package has a new major version. Click one to check it.", PackageListLogic.recommendationText(1, 1))
         assertEquals("3 packages have a new major version. Click one to check it.", PackageListLogic.recommendationText(3, 3))
         assertEquals("12 packages have a new major version. Click one to check it. +2 more in the list.", PackageListLogic.recommendationText(12, 10))
+    }
+
+    // Break: withShared misses a package or project on the same property, or links a same-named
+    // property in another file, or adds a row that cannot be checked.
+    @Test
+    fun withSharedAddsEveryCheckableRowOnTheSameProperty() {
+        fun prop(name: String, outdated: Boolean = true, file: String = "/r/Directory.Build.props") =
+            dep(name, outdated = outdated, property = "SerilogVersion", file = file, line = 3)
+        val entries = PackageListLogic.buildEntries(listOf(
+            section("A", "net8.0", "/a.csproj", listOf(prop("Serilog"), prop("Serilog.Sinks.Console"), dep("Polly"))),
+            section("B", "net8.0", "/b.csproj", listOf(prop("Serilog"), prop("Serilog.Sinks.File", outdated = false))),
+            section("C", "net8.0", "/c.csproj", listOf(prop("Serilog", file = "/r/C/Directory.Build.props"))),
+        ))
+        val rows = entries.filterIsInstance<PackageEntry>()
+        val clicked = rows.first { it.target == "/a.csproj" && it.dep.name == "Serilog" }
+
+        val linked = PackageListLogic.withShared(listOf(clicked), entries)
+
+        assertEquals(
+            setOf("/a.csproj Serilog", "/a.csproj Serilog.Sinks.Console", "/b.csproj Serilog"),
+            linked.map { "${it.target} ${it.dep.name}" }.toSet(),
+        )
+        // A row without a property stays alone.
+        val polly = rows.first { it.dep.name == "Polly" }
+        assertEquals(listOf(polly), PackageListLogic.withShared(listOf(polly), entries))
     }
 }

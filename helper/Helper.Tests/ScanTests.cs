@@ -573,6 +573,44 @@ public class ScanTests
         Assert.Equal(url, row.GetProperty("projectUrl").GetString());
     }
 
+    // Break: Scan drops the property name of a $(Var) version, sets it on a literal version, or
+    // points the location at the reference instead of the property.
+    [Fact]
+    public void RowNamesTheVersionProperty()
+    {
+        var dir = FixtureSolution.NewDir();
+        var feed = FixtureFeed.Create(dir,
+            new FixtureFeed.Package("Serilog", "3.0.0", Array.Empty<string>()),
+            new FixtureFeed.Package("Serilog", "4.0.0", Array.Empty<string>()),
+            new FixtureFeed.Package("Polly", "7.0.0", Array.Empty<string>()),
+            new FixtureFeed.Package("Polly", "7.2.4", Array.Empty<string>()));
+        FixtureSolution.WriteNuGetConfig(dir, ("local", feed));
+        FixtureSolution.Write(dir, "Directory.Build.props", @"<Project>
+  <PropertyGroup>
+    <SerilogVersion>3.0.0</SerilogVersion>
+  </PropertyGroup>
+</Project>");
+        FixtureSolution.Write(dir, "A/A.csproj", $@"<Project Sdk=""Microsoft.NET.Sdk"">
+  <PropertyGroup><TargetFramework>{FixtureSolution.Tfm}</TargetFramework></PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include=""Serilog"" Version=""$(SerilogVersion)"" />
+    <PackageReference Include=""Polly"" Version=""7.0.0"" />
+  </ItemGroup>
+</Project>");
+        var a = Path.Combine(dir, "A/A.csproj");
+        FixtureSolution.Restore(a);
+        using var h = HelperProcess.Start(dir);
+
+        var result = Scan(h, dir, new[] { a });
+        var serilog = Row(result, "Serilog");
+        Assert.Equal("SerilogVersion", serilog.GetProperty("versionProperty").GetString());
+        Assert.EndsWith("Directory.Build.props", serilog.GetProperty("versionFile").GetString());
+        Assert.Equal(3, serilog.GetProperty("versionLine").GetInt32());
+
+        var polly = Row(result, "Polly");
+        Assert.True(!polly.TryGetProperty("versionProperty", out var vp) || vp.ValueKind == JsonValueKind.Null);
+    }
+
     private static void RunExpectSuccess(string exe, string args, string? workingDirectory = null)
     {
         var psi = new ProcessStartInfo(exe, args) { RedirectStandardOutput = true, RedirectStandardError = true };

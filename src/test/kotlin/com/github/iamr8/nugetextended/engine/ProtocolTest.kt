@@ -78,4 +78,11 @@ class ProtocolTest {
         assertEquals(false, json.get("checkUpdates").asBoolean)
         assertEquals("Warning", json.get("credLogLevel").asString)
     }
+
+    // Break: PackageRow has no `versionProperty` field, or Gson maps it to another name.
+    @Test
+    fun parsesVersionProperty() {
+        val row = gson.fromJson("""{"id":"Serilog","versionProperty":"SerilogVersion"}""", PackageRow::class.java)
+        assertEquals("SerilogVersion", row.versionProperty)
+    }
 }

@@ -6,6 +6,7 @@ import com.github.iamr8.nugetextended.model.SeverityColor
 import com.github.iamr8.nugetextended.model.UpgradeSeverity
 import com.github.iamr8.nugetextended.model.isPrerelease
 import com.github.iamr8.nugetextended.model.severityColor
+import java.io.File
 
 /** One package row under a project/target-framework section. */
 data class DepRow(
@@ -32,6 +33,8 @@ data class DepRow(
     val projectUrl: String? = null,
     /** A checkable upgrade to a new major version (not a pre-release): listed in the recommendations banner. */
     val major: Boolean = false,
+    /** The property name when the version is `$(Name)`; its rows check together. */
+    val versionProperty: String? = null,
 )
 
 /** A project + target framework group of packages, e.g. "Sahelanthropus.Data · net10.0". */
@@ -104,7 +107,16 @@ object OutdatedRows {
             )
         }
         // Facts about where the row lives hold for every kind of row.
-        return dep.copy(central = row.central, versionFile = row.versionFile, versionLine = row.versionLine, projectUrl = row.projectUrl)
+        return dep.copy(
+            central = row.central, versionFile = row.versionFile, versionLine = row.versionLine, projectUrl = row.projectUrl,
+            versionProperty = row.versionProperty,
+            note = dep.note ?: row.versionProperty?.let { propertyNote(it, row.versionFile) },
+        )
+    }
+
+    private fun propertyNote(property: String, file: String?): String {
+        val where = file?.let { " in ${File(it).name}" }.orEmpty()
+        return "Set by \$($property)$where. An upgrade moves every package that uses it."
     }
 
     /** A short gray marker for a source failure reason; empty when the row has no such reason. */

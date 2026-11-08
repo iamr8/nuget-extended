@@ -161,6 +161,7 @@ public sealed class Handlers
                             Central = SiteResolver.IsCentral(w.T, w.A.Id),
                             VersionFile = site?.File,
                             VersionLine = site?.Line ?? 0,
+                            VersionProperty = site?.Kind == "property" ? site.Name : null,
                         };
                     // Don't overwrite an existing Reason (bad range text, not resolved): only a row
                     // that would otherwise vanish (no Target, no Reason) gets the source failure.

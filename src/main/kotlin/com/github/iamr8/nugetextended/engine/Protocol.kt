@@ -35,6 +35,8 @@ data class PackageRow(
     val versionLine: Int = 0,
     /** The feed's project URL; only for ids with an update. Untrusted text: open only http(s). */
     val projectUrl: String? = null,
+    /** The property name when the version is `$(Name)`: every package that uses it moves together. */
+    val versionProperty: String? = null,
 )
 
 data class FrameworkRows(val framework: String = "", val packages: List<PackageRow> = emptyList())

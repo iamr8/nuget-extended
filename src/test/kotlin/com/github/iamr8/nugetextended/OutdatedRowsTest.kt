@@ -169,4 +169,17 @@ class OutdatedRowsTest {
         assertFalse(OutdatedRows.toDep(PackageRow("C", "8.0.0", "8.0.0", "8.1.0", "Minor")).major)
         assertFalse(OutdatedRows.toDep(PackageRow("D", "8.0.0", "8.0.0", "9.0.0", "Major", blocked = "shared with E")).major)
     }
+
+    // Break: toDep drops the property name, or the row gets no note saying the version is shared.
+    @Test
+    fun versionPropertyReachesTheRowWithANote() {
+        val dep = OutdatedRows.toDep(PackageRow("Serilog", "3.0.0", "3.0.0", "4.0.0", "Major",
+            versionFile = "/r/Directory.Build.props", versionLine = 3, versionProperty = "SerilogVersion"))
+        assertEquals("SerilogVersion", dep.versionProperty)
+        assertEquals("Set by \$(SerilogVersion) in Directory.Build.props. An upgrade moves every package that uses it.", dep.note)
+
+        val literal = OutdatedRows.toDep(PackageRow("Polly", "7.0.0", "7.0.0", "7.2.4", "Minor", versionFile = "/r/A.csproj", versionLine = 5))
+        assertNull(literal.versionProperty)
+        assertNull(literal.note)
+    }
 }
